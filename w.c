@@ -187,7 +187,7 @@ static const proc_t *getproc(const utmp_t * restrict const u,
 	proc_t **pptr = procs;
 	const proc_t *best = NULL;
 	const proc_t *secondbest = NULL;
-	unsigned uid = ~0U;
+	uid_t uid = 0;
 
 	*found_utpid = 0;
 	if (!ignoreuser) {

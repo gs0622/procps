@@ -141,14 +141,19 @@ typedef struct proc_t {
 	nlwp,		// stat,status     number of threads, or 0 if no clue
 	tgid,		// (special)       thread group ID, the POSIX PID (see also: tid)
 	tty,		// stat            full device number of controlling terminal
-	/* FIXME: int uids & gids should be uid_t or gid_t from pwd.h */
-        euid, egid,     // stat(),status   effective
-        ruid, rgid,     // status          real
-        suid, sgid,     // status          saved
-        fuid, fgid,     // status          fs (used for file access only)
 	tpgid,		// stat            terminal process group id
 	exit_signal,	// stat            might not be SIGCHLD
 	processor;      // stat            current (or most recent?) CPU
+    uid_t
+        euid,           // stat(),status   effective
+        ruid,           // status          real
+        suid,           // status          saved
+        fuid;           // status          fs (used for file access only)
+    gid_t
+        egid,		// see uid_t types above
+        rgid,
+        sgid,
+        fgid;
 #ifdef OOMEM_ENABLE
     int
         oom_score,      // oom_score       (badness for OOM killer)
