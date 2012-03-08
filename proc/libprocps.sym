@@ -42,6 +42,7 @@ global:
 	openproc;
 	pretty_print_signals;
 	print_uptime;
+	print_uptime_abbrv;
 	procps_version;
 	put_slabinfo;
 	readeither;
@@ -54,6 +55,7 @@ global:
 	signal_number_to_name;
 	smp_num_cpus;
 	sprint_uptime;
+	sprint_uptime_abbrv;
 	strtosig;
 	tty_to_dev;
 	unix_print_signals;

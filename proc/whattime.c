@@ -27,7 +27,7 @@
 static char buf[128];
 static double av[3];
 
-char *sprint_uptime(int human_readable) {
+static char *lib_uptime(int abbreviated) {
   struct utmp *utmpstruct;
   int upminutes, uphours, updays, upweeks, upyears, updecades;
   int pos;
@@ -39,7 +39,7 @@ char *sprint_uptime(int human_readable) {
 
 /* first get the current time */
 
-  if (!human_readable) {
+  if (!abbreviated) {
     time(&realseconds);
     realtime = localtime(&realseconds);
     pos = sprintf(buf, " %02d:%02d:%02d ",
@@ -50,7 +50,7 @@ char *sprint_uptime(int human_readable) {
 
   uptime(&uptime_secs, &idle_secs);
 
-  if (human_readable) {
+  if (abbreviated) {
     updecades = (int) uptime_secs / (60*60*24*365*10);
     upyears = ((int) uptime_secs / (60*60*24*365)) % 10;
     upweeks = ((int) uptime_secs / (60*60*24*7)) % 52;
@@ -62,7 +62,7 @@ char *sprint_uptime(int human_readable) {
   strcat (buf, "up ");
   pos += 3;
 
-  if (!human_readable) {
+  if (!abbreviated) {
     if (updays)
       pos += sprintf(buf + pos, "%d day%s, ", updays, (updays != 1) ? "s" : "");
   }
@@ -72,7 +72,7 @@ char *sprint_uptime(int human_readable) {
   uphours = uphours % 24;
   upminutes = upminutes % 60;
 
-  if (!human_readable) {
+  if (!abbreviated) {
     if(uphours)
       pos += sprintf(buf + pos, "%2d:%02d, ", uphours, upminutes);
     else
@@ -93,11 +93,10 @@ char *sprint_uptime(int human_readable) {
 
     loadavg(&av[0], &av[1], &av[2]);
 
-    pos += sprintf(buf + pos, " load average: %.2f, %.2f, %.2f",
-		   av[0], av[1], av[2]);
+    pos += sprintf(buf + pos, " load average: %.2f, %.2f, %.2f", av[0], av[1], av[2]);
   }
 
-  if (human_readable) {
+  if (abbreviated) {
     comma = 0;
 
     if (updecades) {
@@ -140,6 +139,18 @@ char *sprint_uptime(int human_readable) {
   return buf;
 }
 
-void print_uptime(int human_readable) {
-  printf("%s\n", sprint_uptime(human_readable));
+char *sprint_uptime(void) {
+  return lib_uptime(0);
+}
+
+char *sprint_uptime_abbrv(void) {
+  return lib_uptime(1);
+}
+
+void print_uptime(void) {
+  printf("%s\n", lib_uptime(0));
+}
+
+void print_uptime_abbrv(void) {
+  printf("%s\n", lib_uptime(1));
 }

@@ -3479,10 +3479,10 @@ static void summary_show (void) {
    // Display Uptime and Loadavg
    if (isROOM(View_LOADAV, 1)) {
       if (!Rc.mode_altscr)
-         show_special(0, fmtmk(LOADAV_line, Myname, sprint_uptime(0)));
+         show_special(0, fmtmk(LOADAV_line, Myname, sprint_uptime()));
       else
          show_special(0, fmtmk(CHKw(w, Show_TASKON)? LOADAV_line_alt : LOADAV_line
-            , w->grpname, sprint_uptime(0)));
+            , w->grpname, sprint_uptime()));
       Msg_row += 1;
    }
 

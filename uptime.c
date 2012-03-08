@@ -51,6 +51,7 @@ int main(int argc, char **argv)
 			usage(stderr);
 		}
 
-	print_uptime(p);
+	if (p) print_uptime_abbrv();
+	else   print_uptime();
 	return EXIT_SUCCESS;
 }
