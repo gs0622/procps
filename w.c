@@ -7,6 +7,20 @@
  * Michael K. Johnson.
  *
  * Changes by Albert Cahalan, 2002.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include "c.h"
@@ -52,9 +66,6 @@ typedef struct utmp utmp_t;
 #else
 # define FROM_STRING "off"
 #endif
-
-/* Uh... same thing as UT_NAMESIZE */
-#define USERSZ (sizeof u->ut_user)
 
 /* Arbitary setting, not too big for the screen, max host size */
 #define HOSTSZ 40
@@ -235,7 +246,7 @@ static void showinfo(utmp_t * u, int formtype, int maxcmd, int from,
 	unsigned long long jcpu;
 	int ut_pid_found;
 	unsigned i;
-	char uname[USERSZ + 1] = "", tty[5 + sizeof u->ut_line + 1] = "/dev/";
+	char uname[UT_NAMESIZE + 1] = "", tty[5 + UT_LINESIZE + 1] = "/dev/";
 	const proc_t *best;
 
 	for (i = 0; i < sizeof(u->ut_line); i++)
@@ -257,7 +268,7 @@ static void showinfo(utmp_t * u, int formtype, int maxcmd, int from,
 		return;
 
 	/* force NUL term for printf */
-	strncpy(uname, u->ut_user, USERSZ);
+	strncpy(uname, u->ut_user, UT_NAMESIZE);
 
 	if (formtype) {
 		printf("%-*.*s%-9.8s", userlen + 1, userlen, uname, u->ut_line);
@@ -390,10 +401,10 @@ int main(int argc, char **argv)
 	/* Get user field length from environment */
 	if ((env_var = getenv("PROCPS_USERLEN")) != NULL) {
 		userlen = atoi(env_var);
-		if (userlen < 8 || userlen > USERSZ) {
+		if (userlen < 8 || userlen > UT_NAMESIZE) {
 			xwarnx
 			    (_("User length environment PROCPS_USERLEN must be between 8 and %zu, ignoring.\n"),
-			     USERSZ);
+			     UT_NAMESIZE);
 			userlen = 8;
 		}
 	}
@@ -445,7 +456,7 @@ int main(int argc, char **argv)
 				break;
 			if (u->ut_type != USER_PROCESS)
 				continue;
-			if (!strncmp(u->ut_user, user, USERSZ))
+			if (!strncmp(u->ut_user, user, UT_NAMESIZE))
 				showinfo(u, longform, maxcmd, from, userlen,
 					 fromlen);
 		}

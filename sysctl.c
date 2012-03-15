@@ -2,12 +2,20 @@
  * Sysctl 1.01 - A utility to read and manipulate the sysctl parameters
  *
  * "Copyright 1999 George Staikos
- * This file may be used subject to the terms and conditions of the GNU
- * General Public License Version 2, or any later version at your option, as
- * published by the Free Software Foundation.  This program is distributed in
- * the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
- * the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
- * PURPOSE.  See the GNU General Public License for more details."
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * Changelog:
  *            v1.01:
@@ -240,6 +248,8 @@ static int ReadSetting(const char *restrict const name)
 					if (PrintName) {
 						fprintf(stdout, "%s = %s",
 							outname, inbuf);
+						if (inbuf[strlen(inbuf) - 1] != '\n')
+							putchar('\n');
 					} else {
 						if (!PrintNewline) {
 							char *nlptr =
@@ -677,7 +687,7 @@ int main(int argc, char *argv[])
 
 	while ((c =
 		getopt_long(argc, argv, "bneNwfp::qoxaAXr:Vdh", longopts,
-			    NULL)) != -1)
+			    NULL)) != -1) {
 		switch (c) {
 		case 'b':
 			/* This is "binary" format, which means more for BSD. */
@@ -738,6 +748,8 @@ int main(int argc, char *argv[])
 		default:
 			Usage(stderr);
 		}
+	}
+
 	if (DisplayAllOpt)
 		return DisplayAll(PROC_PATH);
 	if (preloadfileOpt)
@@ -755,10 +767,11 @@ int main(int argc, char *argv[])
 				      "Try `%s --help' for more information."),
 		      program_invocation_short_name);
 
-	if (WriteMode || index(*argv, '='))
-		ReturnCode = WriteSetting(*argv);
-	else
-		ReturnCode = ReadSetting(*argv);
-
+	for ( ; *argv; argv++) {
+		if (WriteMode || index(*argv, '='))
+			ReturnCode += WriteSetting(*argv);
+		else
+			ReturnCode += ReadSetting(*argv);
+	}
 	return ReturnCode;
 }
