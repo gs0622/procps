@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include "c.h"
+#include "fileutils.h"
 #include "nls.h"
 #include "proc/escape.h"
 #include "xalloc.h"
@@ -272,10 +273,10 @@ static int one_proc(proc_t * p)
 		       &end, flags, &file_offset, &dev_major, &dev_minor,
 		       &inode);
 
-		if (start > range_high)
-			break;
-		if (end < range_low)
+		if (end - 1 < range_low)
 			continue;
+		if (range_high < start)
+			break;
 
 		tmp = strchr(mapbuf, '\n');
 		if (tmp)
@@ -382,6 +383,28 @@ static int one_proc(proc_t * p)
 	return 0;
 }
 
+static void range_arguments(char *optarg)
+{
+	char *arg1;
+	char *arg2;
+
+	arg1 = xstrdup(optarg);
+	arg2 = strchr(arg1, ',');
+	if (arg2)
+		*arg2 = '\0';
+	if (arg2)
+		++arg2;
+	else
+		arg2 = arg1;
+	if (arg1 && *arg1)
+		range_low = STRTOUKL(arg1, &arg1, 16);
+	if (*arg2)
+		range_high = STRTOUKL(arg2, &arg2, 16);
+	if (arg1 && (*arg1 || *arg2))
+		xerrx(EXIT_FAILURE, "%s: '%s'", _("failed to parse argument"),
+		      optarg);
+}
+
 int main(int argc, char **argv)
 {
 	unsigned *pidlist;
@@ -404,6 +427,7 @@ int main(int argc, char **argv)
 	setlocale (LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
+	atexit(close_stdout);
 
 	x_option = d_option = q_option = 0;
 
@@ -422,32 +446,7 @@ int main(int argc, char **argv)
 			q_option = 1;
 			break;
 		case 'A':
-			{
-				/* FIXME: this should be a function. */
-				char *walk = optarg;
-				char *arg1;
-				char *arg2;
-				if (walk[1]) {
-					arg1 = walk + 1;
-					walk += strlen(walk) - 1;
-				} else {
-					arg1 = *++argv;
-					if (!arg1)
-						usage(stderr);
-				}
-				arg2 = strchr(arg1, ',');
-				if (arg2)
-					*arg2 = '\0';
-				if(arg2) ++arg2;
-				else arg2 = arg1;
-
-				if (arg1 && *arg1)
-					range_low = STRTOUKL(arg1, &arg1, 16);
-				if (*arg2)
-					range_high = STRTOUKL(arg2, &arg2, 16);
-				if (arg1 && (*arg1 || *arg2))
-					usage(stderr);
-			}
+			range_arguments(optarg);
 			break;
 		case 'h':
 			usage(stdout);

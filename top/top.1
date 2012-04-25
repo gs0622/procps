@@ -1,7 +1,7 @@
 .ig
 . manual page for NEW and IMPROVED linux top
 .
-. Copyright (c) 2002-2011, by: James C. Warner
+. Copyright (c) 2002-2012, by: James C. Warner
 .    All rights reserved.      8921 Hilloway Road
 .                              Eden Prairie, Minnesota 55347 USA
 .
@@ -301,6 +301,9 @@ Monitor only processes with specified process IDs.
 This option can be given up to \*(WP times, or you can provide a comma delimited
 list with up to \*(WP pids.
 Co-mingling both approaches is permitted.
+
+A pid value of zero will be treated as the process id of the \*(We program
+itself once it is running.
 
 This is a \*(CO only and should you wish to return to normal operation,
 it is not necessary to quit and and restart \*(We \*(Em just issue any
@@ -806,7 +809,7 @@ secured, simply ask for help and view the system summary on the second
 line.
 
 .TP 7
-\ \ \<\fBEnter\fR> or <\fBSpace\fR> :\fIRefresh-Display \fR
+\ \ <\fBEnter\fR> or <\fBSpace\fR> :\fIRefresh-Display \fR
 These commands awaken \*(We and following receipt of any input
 the entire display will be repainted.
 They also force an update of any hotplugged \*(Pu or \*(MP changes.
@@ -1644,7 +1647,7 @@ With invaluable help from:
 \-*-
 .PD
 .in -3
-Copyright (c) 2002,2011 \*(Em James C. Warner
+Copyright (c) 2002,2012 \*(Em James C. Warner
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.1 or

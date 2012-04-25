@@ -41,6 +41,7 @@
 #include <unistd.h>
 #include <values.h>
 
+#include "../include/fileutils.h"
 #include "../include/nls.h"
 
 #include "../proc/devname.h"
@@ -60,7 +61,7 @@
         /* The original and new terminal definitions
            (only set when not in 'Batch' mode) */
 static struct termios Tty_original,    // our inherited terminal definition
-#ifdef TERMIOS_ONLY
+#ifndef TERMIO_PROXY
                       Tty_tweaked,     // for interactive 'line' input
 #endif
                       Tty_raw;         // for unsolicited input
@@ -111,7 +112,7 @@ static int No_ksyms = -1,       // set to '0' if ksym avail, '1' otherwise
            Width_mode = 0;      // set w/ 'w' - potential output override
 
         /* Unchangeable cap's stuff built just once (if at all) and
-           thus NOT saved in a WIN_t's RCW_t.  To accomodate 'Batch'
+           thus NOT saved in a WIN_t's RCW_t.  To accommodate 'Batch'
            mode, they begin life as empty strings so the overlying
            logic need not change ! */
 static char  Cap_clr_eol    [CAPBUFSIZ] = "",    // global and/or static vars
@@ -461,10 +462,10 @@ static void bye_bye (const char *str) {
 
    if (str) {
       fputs(str, stderr);
-      exit(1);
+      exit(EXIT_FAILURE);
    }
    putp("\n");
-   exit(0);
+   exit(EXIT_SUCCESS);
 } // end: bye_bye
 
 
@@ -824,7 +825,7 @@ static int chin (int ech, char *buf, unsigned cnt) {
    int rc = -1;
 
    fflush(stdout);
-#ifdef TERMIOS_ONLY
+#ifndef TERMIO_PROXY
    if (ech) {
       tcsetattr(STDIN_FILENO, TCSAFLUSH, &Tty_tweaked);
       rc = read(STDIN_FILENO, buf, cnt);
@@ -922,18 +923,21 @@ static int keyin (int init) {
 } // end: keyin
 
 
-#ifdef TERMIOS_ONLY
+#ifndef TERMIO_PROXY
         /*
          * Get line oriented interactive input from the user,
          * using native tty support */
 static char *linein (const char *prompt) {
+   static const char ws[] = "\b\f\n\r\t\v\x1b\x9b";  // 0x1b + 0x9b are escape
    static char buf[MEDBUFSIZ];
+   char *p;
 
    show_pmt(prompt);
    memset(buf, '\0', sizeof(buf));
    chin(1, buf, sizeof(buf)-1);
    putp(Cap_curs_norm);
 
+   if ((p = strpbrk(buf, ws))) *p = '\0';
    // note: we DO produce a vaid 'string'
    return buf;
 } // end: linein
@@ -945,7 +949,9 @@ static char *linein (const char *prompt) {
          * Unlike native tty input support, this function provides:
          * . true line editing, not just destructive backspace
          * . an input limit that's sensitive to current screen dimensions
-         * . immediate signal response without the need to wait for '\n' */
+         * . immediate signal response without the need to wait for '\n'
+         * However, the user will lose the ability to paste keystrokes
+         * when this function is chosen over the smaller alternative above! */
 static char *linein (const char *prompt) {
     // thank goodness memmove allows the two strings to overlap
  #define sqzSTR  { memmove(&buf[pos], &buf[pos+1], bufMAX-pos); \
@@ -1398,7 +1404,7 @@ static void build_headers (void) {
 #ifdef EQUCOLHDRYES
          // prepare to even out column header lengths...
          if (hdrmax + w->hdrcaplen < (x = strlen(w->columnhdr))) hdrmax = x - w->hdrcaplen;
-         // must sacrifice last header positon to avoid task row abberations
+         // must sacrifice last header position to avoid task row abberations
          w->eolcap = Caps_endline;
 #else
          if (Screen_cols > (int)strlen(w->columnhdr)) w->eolcap = Caps_endline;
@@ -1448,7 +1454,7 @@ static void build_headers (void) {
 
 
         /*
-         * This guy coordinates the activities surounding the maintainence
+         * This guy coordinates the activities surrounding the maintainence
          * of each visible window's columns headers and the library flags
          * required for the openproc interface. */
 static void calibrate_fields (void) {
@@ -2207,7 +2213,7 @@ static int config_cvt (WIN_t *q) {
 #ifdef OOMEM_ENABLE
    /* all other fields represent the 'on' state with a capitalized version
       of a particular qwerty key.  for the 2 additional suse out-of-memory
-      fields it make perfect sense to do the exact opposite, doesn't it?
+      fields it makes perfect sense to do the exact opposite, doesn't it?
       in any case, we must turn them 'off' temporarily... */
    if ((p1 = strchr(q->rc.fieldscur, '[')))  *p1 = '{';
    if ((p2 = strchr(q->rc.fieldscur, '\\'))) *p2 = '|';
@@ -2332,7 +2338,7 @@ static void configs_read (void) {
 default_or_error:
 #ifdef RCFILE_NOERR
 {  RCF_t rcdef = DEF_RCFILE;
-   flcose(fp);
+   fclose(fp);
    Rc = rcdef;
    for (i = 0 ; i < GROUPSMAX; i++)
       Winstk[i].rc  = Rc.win[i];
@@ -2414,20 +2420,20 @@ static void parse_args (char **args) {
                break;
             case 'p':
                if (Curwin->usrseltyp) error_exit(N_txt(SELECT_clash_txt));
-               do {
+               do { int i, pid;
                   if (cp[1]) cp++;
                   else if (*args) cp = *args++;
                   else error_exit(fmtmk(N_fmt(MISSING_args_fmt), ch));
                   if (Monpidsidx >= MONPIDMAX)
                      error_exit(fmtmk(N_fmt(LIMIT_exceed_fmt), MONPIDMAX));
-                  if (1 != sscanf(cp, "%d", &Monpids[Monpidsidx])
-                  || 0 > Monpids[Monpidsidx])
+                  if (1 != sscanf(cp, "%d", &pid) || 0 > pid)
                      error_exit(fmtmk(N_fmt(BAD_mon_pids_fmt), cp));
-                  if (!Monpids[Monpidsidx])
-                     Monpids[Monpidsidx] = getpid();
-                  Monpidsidx++;
-                  if (!(p = strchr(cp, ',')))
-                     break;
+                  if (!pid) pid = getpid();
+                  for (i = 0; i < Monpidsidx; i++)
+                     if (Monpids[i] == pid) goto next_pid;
+                  Monpids[Monpidsidx++] = pid;
+               next_pid:
+                  if (!(p = strchr(cp, ','))) break;
                   cp = p;
                } while (*cp);
                break;
@@ -2517,7 +2523,7 @@ static void whack_terminal (void) {
    tmptty.c_iflag &= ~IGNBRK;
    if (key_backspace && 1 == strlen(key_backspace))
       tmptty.c_cc[VERASE] = *key_backspace;
-#ifdef TERMIOS_ONLY
+#ifndef TERMIO_PROXY
    if (-1 == tcsetattr(STDIN_FILENO, TCSAFLUSH, &tmptty))
       error_exit(fmtmk(N_fmt(FAIL_tty_mod_fmt), strerror(errno)));
    tcgetattr(STDIN_FILENO, &Tty_tweaked);
@@ -2561,7 +2567,7 @@ static WIN_t *win_select (char ch) {
       so we must try to get our own darn ch by begging the user... */
    if (!ch) {
       show_pmt(N_txt(CHOOSE_group_txt));
-      if (1 > chin(0, (char *)&ch, 1)) return Curwin;
+      if (1 > chin(0, (char *)&ch, 1)) return w;
    }
    switch (ch) {
       case 'a':                         // we don't carry 'a' / 'w' in our
@@ -2791,7 +2797,7 @@ static void file_writerc (void) {
 
 #ifndef WARN_CFG_OFF
    if (Rc_converted) {
-      show_pmt(N_fmt(XTRA_warncfg_txt));
+      show_pmt(N_txt(XTRA_warncfg_txt));
       if ('y' != tolower(keyin(0)))
          return;
       Rc_converted = 0;
@@ -2810,7 +2816,7 @@ static void file_writerc (void) {
       fprintf(fp, "%s\tfieldscur=%s\n"
          , Winstk[i].rc.winname, Winstk[i].rc.fieldscur);
       fprintf(fp, "\twinflags=%d, sortindx=%d, maxtasks=%d\n"
-         , Winstk[i].rc.winflags, (int)Winstk[i].rc.sortindx
+         , Winstk[i].rc.winflags, Winstk[i].rc.sortindx
          , Winstk[i].rc.maxtasks);
       fprintf(fp, "\tsummclr=%d, msgsclr=%d, headclr=%d, taskclr=%d\n"
          , Winstk[i].rc.summclr, Winstk[i].rc.msgsclr
@@ -2845,7 +2851,7 @@ static void find_string (int ch) {
    if (str[0]) {
       for (i = Curwin->begtask; i < Frame_maxtask; i++) {
          task_show(Curwin, Curwin->ppt[i], buf);
-         if (strstr(buf, str)) {
+         if (STRSTR(buf, str)) {
             found = 1;
             if (i == Curwin->begtask) continue;
             Curwin->begtask = i;
@@ -3253,7 +3259,7 @@ static void keys_xtra (int ch) {
 #else
    OFFw(w, Show_FOREST);
 #endif
-   /* these keys represent old-top compatability --
+   /* these keys represent old-top compatibility --
       they're grouped here so that if users could ever be weaned,
       we would just whack do_key's key_tab entry and this function... */
    switch (ch) {
@@ -3769,7 +3775,6 @@ static int window_show (WIN_t *q, int wmax) {
    }
 
    i = q->begtask;
-   if (i >= Frame_maxtask) i = q->begtask = Frame_maxtask - 1;
    lwin = 1;                                        // 1 for the column header
    wmax = winMIN(wmax, q->winlines + 1);            // ditto for winlines, too
 
@@ -3897,6 +3902,7 @@ static void frame_make (void) {
          * duh... */
 int main (int dont_care_argc, char **argv) {
    (void)dont_care_argc;
+   atexit(close_stdout);
    before(*argv);
                                         //                 +-------------+
    wins_stage_1();                      //                 top (sic) slice

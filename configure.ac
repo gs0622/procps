@@ -14,20 +14,22 @@ AC_CONFIG_HEADERS([config.h])
 AC_GNU_SOURCE
 AC_PROG_CC
 AC_PROG_CC_STDC
-if test "x$ac_cv_prog_cc_c99" = "xno" || test "x$ac_cv_prog_cc_c99" = "x"; then
-# We might be on RHEL5 with a git checkout and so broken
-# autoconf. Check if CC is gcc and if it bails when given -std=gnu99.
-# If not, use that.  Yuck.
-  if test "x$ac_cv_c_compiler_gnu" = "xyes"; then
-     CC="$CC -std=gnu99"
-     AC_RUN_IFELSE(
-        [AC_LANG_PROGRAM([],[[
-return 0;
-    ]])],
-    [],
-    [AC_MSG_ERROR([Could not find a C99 compatible compiler])])
-  else
-    AC_MSG_ERROR([Could not find a C99 compatible compiler])
+if test "$cross_compiling" = no; then
+  if test "x$ac_cv_prog_cc_c99" = "xno" || test "x$ac_cv_prog_cc_c99" = "x"; then
+  # We might be on RHEL5 with a git checkout and so broken
+  # autoconf. Check if CC is gcc and if it bails when given -std=gnu99.
+  # If not, use that.  Yuck.
+    if test "x$ac_cv_c_compiler_gnu" = "xyes"; then
+       CC="$CC -std=gnu99"
+       AC_RUN_IFELSE(
+          [AC_LANG_PROGRAM([],[[
+  return 0;
+      ]])],
+      [],
+      [AC_MSG_ERROR([Could not find a C99 compatible compiler])])
+    else
+      AC_MSG_ERROR([Could not find a C99 compatible compiler])
+    fi
   fi
 fi
 AM_PROG_CC_C_O
@@ -136,7 +138,7 @@ dnl	ALL_LINGUAS="af am ar as be bg bn_IN bn ca cs cy da de el en_GB es et eu_ES 
 dnl fi
 
 AC_MSG_CHECKING(whether program_invocation_short_name is defined)
-AC_TRY_COMPILE([#include <argp.h>],
+AC_TRY_COMPILE([#include <errno.h>],
 		[program_invocation_short_name = "test";],
 		AC_DEFINE(HAVE_PROGRAM_INVOCATION_SHORT_NAME, 1,
 			[Define if program_invocation_short_name is defined])
@@ -178,6 +180,12 @@ AC_ARG_ENABLE([kill],
 )
 AM_CONDITIONAL(BUILD_KILL, test "x$enable_kill" = xyes)
 AM_CONDITIONAL(LINUX, test "x$host_os" = xlinux-gnu)
+
+AC_ARG_ENABLE([skill],
+  AS_HELP_STRING([--enable-skill], [build skill and snice]),
+  [], enable_skill=no
+)
+AM_CONDITIONAL(BUILD_SKILL, test "x$build_skill" = xyes)
 
 AC_ARG_ENABLE([oomem],
   AS_HELP_STRING([--enable-oomem], [add out-of-memory fields to the library and top]),

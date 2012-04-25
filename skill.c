@@ -35,6 +35,7 @@
 #include <unistd.h>
 
 #include "c.h"
+#include "fileutils.h"
 #include "strutils.h"
 #include "nls.h"
 #include "xalloc.h"
@@ -43,6 +44,7 @@
 #include "proc/devname.h"
 #include "proc/procps.h"	/* char *user_from_uid(uid_t uid) */
 #include "proc/version.h"	/* procps_version */
+#include "rpmatch.h"
 
 #define DEFAULT_NICE 4
 
@@ -375,6 +377,7 @@ static void __attribute__ ((__noreturn__))
 	setlocale (LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
+	atexit(close_stdout);
 
 	if (argc < 2)
 		kill_usage(stderr);
@@ -473,9 +476,7 @@ static void skillsnice_parse(int argc,
 {
 	int signo = -1;
 	int prino = DEFAULT_NICE;
-	int num_found = 0;
 	int ch, i;
-	const char *restrict argptr;
 
 	static const struct option longopts[] = {
 		{"command", required_argument, NULL, 'c'},
@@ -545,30 +546,10 @@ static void skillsnice_parse(int argc,
 			{
 				struct stat sbuf;
 				char path[32];
-				if (!optarg)
-					/* Huh? Maybe "skill -t ''". */
-					skillsnice_usage(stderr);
 				snprintf(path, 32, "/dev/%s", optarg);
 				if (stat(path, &sbuf) >= 0
 				    && S_ISCHR(sbuf.st_mode)) {
-					num_found++;
 					ENLIST(tty, sbuf.st_rdev);
-					if (!NEXTARG)
-						break;
-				} else if (optarg && !(optarg[1])) {
-					/* if only 1 character */
-					switch (*optarg) {
-					default:
-						if (stat(optarg, &sbuf) < 0)
-							/* the shell eats '?' */
-							break;
-					case '-':
-					case '?':
-						num_found++;
-						ENLIST(tty, 0);
-						if (!NEXTARG)
-							break;
-					}
 				}
 			}
 			break;
@@ -577,10 +558,7 @@ static void skillsnice_parse(int argc,
 				struct passwd *passwd_data;
 				passwd_data = getpwnam(optarg);
 				if (passwd_data) {
-					num_found++;
 					ENLIST(uid, passwd_data->pw_uid);
-					if (!NEXTARG)
-						break;
 				}
 			}
 			break;
