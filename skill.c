@@ -98,7 +98,8 @@ static void hurt_proc(int tty, int uid, int pid, const char *restrict const cmd,
 		fprintf(stderr, "%-8s %-8s %5d %-16.16s   ? ",
 			(char *)dn_buf, user_from_uid(uid), pid, cmd);
 		fflush (stdout);
-		getline(&buf, &len, stdin);
+		if (getline(&buf, &len, stdin) == -1)
+			return;
 		if (rpmatch(buf) < 1) {
 			free(buf);
 			return;
@@ -336,7 +337,7 @@ static void __attribute__ ((__noreturn__)) skillsnice_usage(FILE * out)
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
-int skill_sig_option(int *argc, char **argv)
+static int skill_sig_option(int *argc, char **argv)
 {
 	int i, nargs = *argc;
 	int signo = -1;
@@ -362,6 +363,7 @@ static void __attribute__ ((__noreturn__))
 {
 	int signo, i;
 	int sigopt = 0;
+	int loop = 1;
 	long pid;
 	int exitvalue = EXIT_SUCCESS;
 
@@ -388,7 +390,8 @@ static void __attribute__ ((__noreturn__))
 	else
 		sigopt++;
 
-	while ((i = getopt_long(argc, argv, "l::Ls:hV", longopts, NULL)) != -1)
+	opterr=0; /* suppress errors on -123 */
+	while (loop == 1 && (i = getopt_long(argc, argv, "l::Ls:hV", longopts, NULL)) != -1)
 		switch (i) {
 		case 'l':
 			if (optarg) {
@@ -415,6 +418,13 @@ static void __attribute__ ((__noreturn__))
 		case 'V':
 			display_kill_version();
 			exit(EXIT_SUCCESS);
+		case '?':
+			if (!isdigit(optopt)) {
+				xwarnx(_("invalid argument %c"), optopt);
+				kill_usage(stderr);
+			}
+			loop=0;
+			break;
 		default:
 			kill_usage(stderr);
 		}
@@ -447,7 +457,7 @@ static void _skillsnice_usage(int line)
 
 /* common skill/snice argument parsing code */
 
-int snice_prio_option(int *argc, char **argv)
+static int snice_prio_option(int *argc, char **argv)
 {
 	int i = 1, nargs = *argc;
 	long prio = DEFAULT_NICE;

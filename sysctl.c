@@ -29,9 +29,11 @@
 #include <dirent.h>
 #include <errno.h>
 #include <getopt.h>
+#include <glob.h>
 #include <libgen.h>
 #include <limits.h>
 #include <regex.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,11 +47,6 @@
 #include "xalloc.h"
 #include "proc/procps.h"
 #include "proc/version.h"
-
-/* Proof that C++ causes brain damage: */
-typedef int bool;
-static bool true  = 1;
-static bool false = 0;
 
 /*
  *    Globals...
@@ -70,7 +67,7 @@ static bool Quiet;
 static char *pattern;
 
 /* Function prototypes. */
-static int pattern_match(const char *string, const char *pattern);
+static int pattern_match(const char *string, const char *pat);
 static int DisplayAll(const char *restrict const path);
 
 static void slashdot(char *restrict p, char old, char new)
@@ -293,7 +290,7 @@ static int ReadSetting(const char *restrict const name)
 	return rc;
 }
 
-int is_deprecated(char *filename)
+static int is_deprecated(char *filename)
 {
 	int i;
 	for (i = 0; strlen(DEPRECATED[i]); i++) {
@@ -362,6 +359,8 @@ static int WriteSetting(const char *setting)
 	const char *equals;
 	char *tmpname;
 	char *outname;
+	char *last_dot;
+
 	FILE *fp;
 	struct stat ts;
 
@@ -399,7 +398,8 @@ static int WriteSetting(const char *setting)
 	outname[equals - name] = 0;
 	/* change / to . */
 	slashdot(outname, '/', '.');
-	if(is_deprecated(strrchr(outname, '.') + 1)) {
+	last_dot = strrchr(outname, '.');
+	if (last_dot != NULL && is_deprecated(last_dot + 1)) {
 		xwarnx(_("%s is deprecated, value not set"), outname);
 		goto out;
         }
@@ -469,12 +469,12 @@ static int WriteSetting(const char *setting)
 	return rc;
 }
 
-static int pattern_match(const char *string, const char *pattern)
+static int pattern_match(const char *string, const char *pat)
 {
 	int status;
 	regex_t re;
 
-	if (regcomp(&re, pattern, REG_EXTENDED | REG_NOSUB) != 0)
+	if (regcomp(&re, pat, REG_EXTENDED | REG_NOSUB) != 0)
 		return (0);
 	status = regexec(&re, string, (size_t) 0, NULL, 0);
 	regfree(&re);
@@ -496,53 +496,61 @@ static int Preload(const char *restrict const filename)
 	int n = 0;
 	int rc = 0;
 	char *name, *value;
+	glob_t globbuf;
+	int globerr;
+	int j;
 
-	fp = (filename[0] == '-' && !filename[1])
-	    ? stdin : fopen(filename, "r");
+	globerr = glob(filename, GLOB_NOCHECK | GLOB_TILDE, NULL, &globbuf);
+	if (globerr != 0 && globerr != GLOB_NOMATCH)
+		xerr(EXIT_FAILURE, _("glob failed"));
 
-	if (!fp) {
-		xwarn(_("cannot open \"%s\""), filename);
-		return -1;
-	}
-
-	while (fgets(oneline, sizeof oneline, fp)) {
-		n++;
-		t = StripLeadingAndTrailingSpaces(oneline);
-
-		if (strlen(t) < 2)
-			continue;
-
-		if (*t == '#' || *t == ';')
-			continue;
-
-		name = strtok(t, "=");
-		if (!name || !*name) {
-			xwarnx(_("%s(%d): invalid syntax, continuing..."),
-			       filename, n);
-			continue;
+	for (j = 0; j < globbuf.gl_pathc; j++) {
+		fp = (globbuf.gl_pathv[j][0] == '-' && !globbuf.gl_pathv[j][1])
+		    ? stdin : fopen(globbuf.gl_pathv[j], "r");
+		if (!fp) {
+			xwarn(_("cannot open \"%s\""), globbuf.gl_pathv[j]);
+			return -1;
 		}
 
-		StripLeadingAndTrailingSpaces(name);
+		while (fgets(oneline, sizeof oneline, fp)) {
+			n++;
+			t = StripLeadingAndTrailingSpaces(oneline);
 
-		if (pattern && !pattern_match(name, pattern))
-			continue;
+			if (strlen(t) < 2)
+				continue;
 
-		value = strtok(NULL, "\n\r");
-		if (!value || !*value) {
-			xwarnx(_("%s(%d): invalid syntax, continuing..."),
-			       filename, n);
-			continue;
+			if (*t == '#' || *t == ';')
+				continue;
+
+			name = strtok(t, "=");
+			if (!name || !*name) {
+				xwarnx(_("%s(%d): invalid syntax, continuing..."),
+				       globbuf.gl_pathv[j], n);
+				continue;
+			}
+
+			StripLeadingAndTrailingSpaces(name);
+
+			if (pattern && !pattern_match(name, pattern))
+				continue;
+
+			value = strtok(NULL, "\n\r");
+			if (!value || !*value) {
+				xwarnx(_("%s(%d): invalid syntax, continuing..."),
+				       globbuf.gl_pathv[j], n);
+				continue;
+			}
+
+			while ((*value == ' ' || *value == '\t') && *value != 0)
+				value++;
+
+			/* should NameOnly affect this? */
+			sprintf(buffer, "%s=%s", name, value);
+			rc |= WriteSetting(buffer);
 		}
 
-		while ((*value == ' ' || *value == '\t') && *value != 0)
-			value++;
-
-		/* should NameOnly affect this? */
-		sprintf(buffer, "%s=%s", name, value);
-		rc |= WriteSetting(buffer);
+		fclose(fp);
 	}
-
-	fclose(fp);
 	return rc;
 }
 
@@ -582,8 +590,8 @@ static int PreloadSystem(void)
 			if (!strcmp(de->d_name, ".")
 			    || !strcmp(de->d_name, ".."))
 				continue;
-			if (strlen(de->d_name) < 6
-			    || !strcmp(de->d_name + strlen(de->d_name) - 6, ".conf"))
+			if (strlen(de->d_name) < 5
+			    || strcmp(de->d_name + strlen(de->d_name) - 5, ".conf"))
 				continue;
 			/* check if config already known */
 			for (i = 0; i < ncfgs; ++i) {
@@ -639,13 +647,12 @@ static int PreloadSystem(void)
  */
 int main(int argc, char *argv[])
 {
-	bool SwitchesAllowed = true;
 	bool WriteMode = false;
 	bool DisplayAllOpt = false;
 	bool preloadfileOpt = false;
 	int ReturnCode = 0;
 	int c;
-	const char *preloadfile = DEFAULT_PRELOAD;
+	const char *preloadfile = NULL;
 
 	enum {
 		DEPRECATED_OPTION = CHAR_MAX + 1,
@@ -706,7 +713,6 @@ int main(int argc, char *argv[])
 			NameOnly = true;
 			break;
 		case 'w':
-			SwitchesAllowed = false;
 			WriteMode = true;
 			break;
 		case 'f':	/* the NetBSD way */
@@ -748,13 +754,27 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (DisplayAllOpt)
-		return DisplayAll(PROC_PATH);
-	if (preloadfileOpt)
-		return Preload(preloadfile);
-
 	argc -= optind;
 	argv += optind;
+
+	if (DisplayAllOpt)
+		return DisplayAll(PROC_PATH);
+
+	if (preloadfileOpt) {
+		int ret = EXIT_SUCCESS, i;
+		if (!preloadfile) {
+			if (!argc) {
+				ret != Preload(DEFAULT_PRELOAD);
+			}
+		} else {
+			/* This happens when -pfile option is
+			 * used without space. */
+			Preload(preloadfile);
+		}
+		for (i = 0; i < argc; i++)
+			Preload(argv[i]);
+		return ret;
+	}
 
 	if (argc < 1)
 		xerrx(EXIT_FAILURE, _("no variables specified\n"

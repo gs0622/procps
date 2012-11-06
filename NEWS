@@ -1,3 +1,24 @@
+procps-ng-3.3.6
+---------------
+  * Adjusted pmap pidlist storage Debian #688180
+
+procps-ng-3.3.5
+---------------
+  * Bumped SONAME to take into acccount API change
+
+procps-ng-3.3.4
+---------------
+  * Removed ps -aux bogus message
+  * w get -i option to display IP addresses
+  * watch 8bit fixes Debian #675069
+  * Fixed FTBFS for non-linux Debian #677055
+  * pkill -u <uid> doesn't need space Debian #676239
+  * top enables intra-column horizontal scrolling
+  * top can display a task's environment
+  * top can display major/minor pg fault deltas, Debian ##84992
+  * top provides additional control over column widths
+  * top offers user controlled left/right justification
+
 procps-ng-3.3.3
 ---------------
   * watch -g command repeats until something changes
@@ -7,6 +28,11 @@ procps-ng-3.3.3
   * top can read old toprc configuration files Debian #651213, #651863
   * top supports input paste once again Debian #663334
   * top -p avoids SEGV when pid doesn't exist Debian 668335
+  * Various DejaGNU test cases fixed
+  * pgrep.1 graoff syntax fix Debian #665425
+  * sysctl avoid crash when -p file has unexpected input
+  * sysctl .conf off-by-one error Debian #669128
+  * libprocps: protect locale env getting overwrite RedHat #548711
 
   * Documentation catch up (fixed prior to 3.3.3)
     . top repeating "%" wastes space Debian #322984
@@ -14,6 +40,7 @@ procps-ng-3.3.3
     . top memory leaks Debian #627257
     . top impossible task swap statistics Debian #628462
     . top forest view segfault Debian #650864
+
 
 procps-ng-3.3.1 --> procps-ng-3.3.2
 --------------------------------
@@ -233,7 +260,7 @@ procps-3.2.0 --> procps-3.2.1
 build even w/ curses in an odd location -- thanks to Segher Boessenkool
 ps: STAT flags for fg process group and session leader
 ps: STAT flags for swapped out process dropped (was broken)
-ps: new -M and Z options for security data (SE Linux, etc.)
+ps: new -M and Z options for security data (SELinux, etc.)
 slabtop: detect broken /proc/slabinfo -- thanks to Fabian Frederick
 slabtop: ensure that error messages show up on the screen -- FF again
 

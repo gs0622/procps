@@ -185,7 +185,13 @@ AC_ARG_ENABLE([skill],
   AS_HELP_STRING([--enable-skill], [build skill and snice]),
   [], enable_skill=no
 )
-AM_CONDITIONAL(BUILD_SKILL, test "x$build_skill" = xyes)
+AM_CONDITIONAL(BUILD_SKILL, test "x$enable_skill" = xyes)
+
+AC_ARG_ENABLE([examples],
+  AS_HELP_STRING([--enable-examples], [add example files to installation]),
+  [], enable_examples=no
+)
+AM_CONDITIONAL(EXAMPLE_FILES, test "x$enable_examples" = xyes)
 
 AC_ARG_ENABLE([oomem],
   AS_HELP_STRING([--enable-oomem], [add out-of-memory fields to the library and top]),

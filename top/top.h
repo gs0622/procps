@@ -34,15 +34,16 @@
 //#define EQUCOLHDRYES            /* yes, do equalize column header lengths  */
 //#define OFF_HST_HASH            /* use BOTH qsort+bsrch vs. hashing scheme */
 //#define OFF_STDIOLBF            /* disable our own stdout _IOFBF override  */
+//#define PERCENTBOOST            /* enable extended precision for % fields  */
 //#define PRETEND2_5_X            /* pretend we're linux 2.5.x (for IO-wait) */
 //#define PRETEND4CPUS            /* pretend we're smp with 4 ticsers (sic)  */
 //#define PRETENDNOCAP            /* use a terminal without essential caps   */
 //#define RCFILE_NOERR            /* rcfile errs silently default, vs. fatal */
 //#define RMAN_IGNORED            /* don't consider auto right margin glitch */
+//#define SCROLLVAR_NO            /* disable intra-column horizontal scroll  */
 //#define STRINGCASENO            /* case insenstive compare/locate versions */
 //#define TERMIO_PROXY            /* true line editing, beyond native input  */
 //#define TREE_NORESET            /* sort keys do NOT force forest view OFF  */
-//#define TREE_ONEPASS            /* for speed, tolerate dangling children   */
 //#define USE_X_COLHDR            /* emphasize header vs. whole col, for 'x' */
 //#define VALIDATE_NLS            /* validate integrity of all 3 nls tables  */
 //#define WARN_CFG_OFF            /* warning OFF when overwriting old rcfile */
@@ -115,10 +116,16 @@ char *strcasestr(const char *haystack, const char *needle);
 #define LRGBUFSIZ   512
 #define OURPATHSZ  1024
 #define BIGBUFSIZ  2048
-   /* in addition to the actual display data, our row might have to accomodate
+   /* in addition to the actual display data, our row might have to accommodate
       many termcap/color transitions - these definitions ensure we have room */
 #define ROWMINSIZ  ( SCREENMAX +  4 * (CAPBUFSIZ + CLRBUFSIZ) )
 #define ROWMAXSIZ  ( SCREENMAX + 16 * (CAPBUFSIZ + CLRBUFSIZ) )
+
+   // space between task fields/columns
+#define COLPADSTR   " "
+#define COLPADSIZ   ( sizeof(COLPADSTR) - 1 )
+   // continuation ch when field/column truncated
+#define COLPLUSCH   '+'
 
    // support for keyboard stuff (cursor motion keystrokes, mostly)
 #define kbd_ENTER  '\n'
@@ -165,6 +172,8 @@ enum pflag {
 #ifdef OOMEM_ENABLE
    P_OOA, P_OOM,
 #endif
+   P_ENV,
+   P_FV1, P_FV2,
 #ifdef USE_X_COLHDR
    // not really pflags, used with tbl indexing
    P_MAXPFLGS
@@ -174,9 +183,9 @@ enum pflag {
 #endif
 };
 
-        /* The scaling 'type' used with scale_num() -- this is how
+        /* The scaling 'type' used with scale_unum() -- this is how
            the passed number is interpreted should scaling be necessary */
-enum scale_num {
+enum scale_unum {
    SK_no, SK_Kb, SK_Mb, SK_Gb, SK_Tb
 };
 
@@ -193,33 +202,33 @@ typedef int (*QFP_t)(const void *, const void *);
         /* This structure consolidates the information that's used
            in a variety of display roles. */
 typedef struct FLD_t {
-   const char   *head;          // name for col heads + toggle/reorder fields
-   const char   *fmts;          // snprintf format string for field display
-   const int     width;         // field width, if applicable
-   const int     scale;         // scale_num type, if applicable
+   int           width;         // field width, if applicable
+   const int     scale;         // scale_unum type, if applicable
+   const int     align;         // the default column alignment flag
    const QFP_t   sort;          // sort function
    const int     lflg;          // PROC_FILLxxx flag(s) needed by this field
-   const char   *desc;          // description for fields management
 } FLD_t;
 
 #ifdef OFF_HST_HASH
-        /* This structure supports 'history' processing and ultimately records
-           one piece of critical information from one frame to the next --
+        /* This structure supports 'history' processing and records the
+           bare minimum of needed information from one frame to the next --
            we don't calc and save data that goes unused like the old top. */
 typedef struct HST_t {
    TIC_t tics;                  // last frame's tics count
-   int   pid;                   // record 'key'
+   unsigned long maj, min;      // last frame's maj/min_flt counts
+   int pid;                     // record 'key'
 } HST_t;
 #else
-        /* This structure supports 'history' processing and ultimately records
-           one piece of critical information from one frame to the next --
+        /* This structure supports 'history' processing and records the
+           bare minimum of needed information from one frame to the next --
            we don't calc and save data that goes unused like the old top nor
            do we incure the overhead of sorting to support a binary search
            (or worse, a friggin' for loop) when retrieval is necessary! */
 typedef struct HST_t {
    TIC_t tics;                  // last frame's tics count
-   int   pid;                   // record 'key'
-   int   lnk;                   // next on hash chain
+   unsigned long maj, min;      // last frame's maj/min_flt counts
+   int pid;                     // record 'key'
+   int lnk;                     // next on hash chain
 } HST_t;
 #endif
 
@@ -276,12 +285,16 @@ typedef struct CPU_t {
 #define Show_TASKON  0x000010     // '-' - tasks showable when Mode_altscr
 #define Show_FOREST  0x000002     // 'V' - show cmd/cmdlines with ascii art
 #define Qsrt_NORMAL  0x000004     // 'R' - reversed column sort (high to low)
+#define Show_JRSTRS  0x040000     // 'j' - right justify "string" data cols
+#define Show_JRNUMS  0x020000     // 'J' - right justify "numeric" data cols
         // these flag(s) have no command as such - they're for internal use
+#define INFINDS_xxx  0x010000     // build rows for find_string, not display
 #define EQUWINS_xxx  0x000001     // rebalance all wins & tasks (off i,n,u/U)
 
         // Default flags if there's no rcfile to provide user customizations
 #define DEF_WINFLGS ( View_LOADAV | View_STATES | View_CPUSUM | View_MEMORY \
-   | Show_HIBOLD | Show_HIROWS | Show_IDLEPS | Show_TASKON | Qsrt_NORMAL )
+   | Show_HIBOLD | Show_HIROWS | Show_IDLEPS | Show_TASKON | Show_JRNUMS \
+   | Qsrt_NORMAL )
 
         /* These are used to direct wins_reflag */
 enum reflag_enum {
@@ -314,11 +327,12 @@ typedef struct RCF_t {
    float  delay_time;           // 'd'/'s' - How long to sleep twixt updates
    int    win_index;            // Curwin, as index
    RCW_t  win [GROUPSMAX];      // a 'WIN_t.rc' for each window
+   int    fixed_widest;         // 'X' - wider non-scalable col addition
 } RCF_t;
 
         /* This structure stores configurable information for each window.
            By expending a little effort in its creation and user requested
-           maintainence, the only real additional per frame cost of having
+           maintenance, the only real additional per frame cost of having
            windows is an extra sort -- but that's just on pointers! */
 typedef struct WIN_t {
    FLG_t  pflgsall [PFLAGSSIZ],        // all 'active/on' fieldscur, as enum
@@ -331,6 +345,9 @@ typedef struct WIN_t {
           begpflg,         // scrolled beginning pos into pflgsall array
           endpflg,         // scrolled ending pos into pflgsall array
           begtask,         // scrolled beginning pos into Frame_maxtask
+#ifndef SCROLLVAR_NO
+          varcolbeg,       // scrolled position within variable width col
+#endif
           varcolsz,        // max length of variable width column(s)
           usrseluid,       // validated uid for 'u/U' user selection
           usrseltyp,       // the basis for matching above uid
@@ -379,6 +396,18 @@ typedef struct WIN_t {
 #define ENUviz(w,E)  (NULL != memchr((w)->procflgs, E, (w)->maxpflgs))
 #define ENUpos(w,E)  ((int)((FLG_t*)memchr((w)->pflgsall, E, (w)->totpflgs) - (w)->pflgsall))
 
+        // Support for variable width columns (and potentially scrolling too)
+#define VARcol(E)    (-1 == Fieldstab[E].width)
+#ifndef SCROLLVAR_NO
+#ifdef USE_X_COLHDR
+#define VARright(w)  (1 == w->maxpflgs && VARcol(w->procflgs[0]))
+#else
+#define VARright(w) ((1 == w->maxpflgs && VARcol(w->procflgs[0])) || \
+                     (3 == w->maxpflgs && X_XON == w->procflgs[0] && VARcol(w->procflgs[1])))
+#endif
+#define VARleft(w)   (w->varcolbeg && VARright(w))
+#define SCROLLAMT    8
+#endif
 
         /* Special Section: end ------------------------------------------ */
         /* /////////////////////////////////////////////////////////////// */
@@ -481,7 +510,7 @@ typedef struct WIN_t {
         /* Configuration files support */
 #define SYS_RCFILESPEC  "/etc/toprc"
 #define RCF_EYECATCHER  "Config File (Linux processes with windows)\n"
-#define RCF_VERSION_ID  'f'
+#define RCF_VERSION_ID  'g'
 
         /* The default fields displayed and their order, if nothing is
            specified by the loser, oops user.
@@ -523,11 +552,7 @@ typedef struct WIN_t {
    { P_UEN, DEF_WINFLGS, 0, \
       COLOR_YELLOW, COLOR_YELLOW, COLOR_GREEN, COLOR_YELLOW, \
       "Usr", USR_FIELDS } \
-   } }
-
-        /* The format string used with variable width columns --
-           see 'calibrate_fields' for supporting logic. */
-#define VARCOL_fmts  "%-*.*s "
+   }, 0 }
 
         /* Summary Lines specially formatted string(s) --
            see 'show_special' for syntax details + other cautions. */
@@ -572,6 +597,7 @@ typedef struct WIN_t {
 //atic int           show_pmt (const char *str);
 //atic inline void   show_scroll (void);
 //atic void          show_special (int interact, const char *glob);
+//atic void          updt_scroll_msg (void);
 /*------  Low Level Memory/Keyboard support  -----------------------------*/
 //atic void         *alloc_c (size_t num);
 //atic void         *alloc_r (void *ptr, size_t num);
@@ -581,10 +607,17 @@ typedef struct WIN_t {
 /*------  Small Utility routines  ----------------------------------------*/
 //atic float         get_float (const char *prompt);
 //atic int           get_int (const char *prompt);
-//atic const char   *scale_num (unsigned long num, const int width, const int type);
-//atic const char   *scale_tics (TIC_t tics, const int width);
+//atic inline const char *hex_make (KLONG num, int noz);
 //atic const char   *user_certify (WIN_t *q, const char *str, char typ);
 //atic inline int    user_matched (WIN_t *q, const proc_t *p);
+/*------  Basic Formatting support  --------------------------------------*/
+//atic inline const char *justify_pad (const char *str, int width, int justr);
+//atic inline const char *make_chr (const char ch, int width, int justr);
+//atic inline const char *make_num (long num, int width, int justr, int col);
+//atic inline const char *make_str (const char *str, int width, int justr, int col);
+//atic inline const char *scale_pcnt (float num, int width, int justr);
+//atic const char   *scale_tics (TIC_t tics, int width, int justr);
+//atic const char   *scale_unum (unsigned long num, int type, int width, int justr);
 /*------  Fields Management support  -------------------------------------*/
 /*atic FLD_t         Fieldstab[] = { ... }                                */
 //atic void          adj_geometry (void);
@@ -592,6 +625,7 @@ typedef struct WIN_t {
 //atic void          calibrate_fields (void);
 //atic void          display_fields (int focus, int extend);
 //atic void          fields_utility (void);
+//atic inline void   widths_resize (void);
 //atic void          zap_fieldstab (void);
 /*------  Library Interface  ---------------------------------------------*/
 //atic CPU_t        *cpus_refresh (CPU_t *cpus);
@@ -629,14 +663,15 @@ typedef struct WIN_t {
 //atic void          keys_window (int ch);
 //atic void          keys_xtra (int ch);
 /*------  Forest View support  -------------------------------------------*/
-//atic void          forest_add (const int self, const int level);
+//atic void          forest_adds (const int self, const int level);
+//atic int           forest_based (const proc_t **x, const proc_t **y);
 //atic void          forest_create (WIN_t *q);
 //atic inline const char *forest_display (const WIN_t *q, const proc_t *p);
 /*------  Main Screen routines  ------------------------------------------*/
 //atic void          do_key (int ch);
 //atic void          summary_hlp (CPU_t *cpu, const char *pfx);
 //atic void          summary_show (void);
-//atic void          task_show (const WIN_t *q, const proc_t *p, char *ptr);
+//atic const char   *task_show (const WIN_t *q, const proc_t *p);
 //atic int           window_show (WIN_t *q, int wmax);
 /*------  Entry point plus two  ------------------------------------------*/
 //atic void          frame_hlp (int wix, int max);

@@ -401,7 +401,7 @@ Show different scheduler information for the
 option.
 .TP
 .B \-\-context
-Display security context format (for SE Linux).
+Display security context format (for SELinux).
 .TP
 .B \-f
 Do full\-format listing. This option can be combined with many other
@@ -446,7 +446,7 @@ option is often useful with this.
 .B \-M
 Add a column of security data.  Identical to
 .B Z
-(for SE Linux).
+(for SELinux).
 .TP
 .BI O \ format
 is preloaded
@@ -530,7 +530,7 @@ with
 .B Z
 Add a column of security data.  Identical to
 .B \-M
-(for SE Linux).
+(for SELinux).
 .\" """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 .PD
 .PP
@@ -803,6 +803,17 @@ if the parent process exits.
 .PP
 If the length of the username is greater than the length of the display
 column, the numeric user ID is displayed instead.
+.PP
+Commands options such as 
+.B ps
+.I\-aux
+are not recommended as it is a confusion of two different standards.
+According to the POSIX and UNIX standards, the above command asks to
+display all processes with a TTY (generally the commands users are
+running) plus all processes owned by a user named "x".  If that user
+doesn't exist, then 
+.B ps
+will assume you really meant "\fBps\fR \fIaux\fR".
 .SH "PROCESS FLAGS"
 The sum of these values is displayed in the "F" column,
 which is provided by the
@@ -1290,7 +1301,7 @@ format is displayed.  (alias
 T}
 
 label	LABEL	T{
-security label, most commonly used for SE Linux context data.  This is for
+security label, most commonly used for SELinux context data.  This is for
 the
 .I Mandatory Access Control
 ("MAC") found on high\-security systems.

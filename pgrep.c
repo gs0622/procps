@@ -41,6 +41,8 @@
 #define EXIT_FATAL 3
 #define XALLOC_EXIT_CODE EXIT_FATAL
 
+#define CMDSTRSIZE 4096
+
 #include "c.h"
 #include "fileutils.h"
 #include "nls.h"
@@ -62,6 +64,7 @@ struct el {
 
 static int opt_full = 0;
 static int opt_long = 0;
+static int opt_longlong = 0;
 static int opt_oldest = 0;
 static int opt_newest = 0;
 static int opt_negate = 0;
@@ -94,7 +97,7 @@ static int __attribute__ ((__noreturn__)) usage(int opt)
 	fputs(USAGE_OPTIONS, fp);
 	if (i_am_pkill == 0) {
 		fputs(_(" -c, --count               count of matching processes\n"
-			" -d, --delimeter <string>  specify output delimeter\n"
+			" -d, --delimiter <string>  specify output delimiter\n"
 			" -l, --list-name           list PID and process name\n"
 			" -v, --inverse             negates the matching\n"), fp);
 	}
@@ -184,23 +187,6 @@ static int strict_atol (const char *restrict str, long *restrict value)
 
 #include <sys/file.h>
 
-/* Seen non-BSD code do this:
- *
- *if (fcntl_lock(pid_fd, F_SETLK, F_WRLCK, SEEK_SET, 0, 0) == -1)
- *                return -1;
- */
-int fcntl_lock(int fd, int cmd, int type, int whence, int start, int len)
-{
-	struct flock lock[1];
-
-	lock->l_type = type;
-	lock->l_whence = whence;
-	lock->l_start = start;
-	lock->l_len = len;
-
-	return fcntl(fd, cmd, lock);
-}
-
 /* We try a read lock. The daemon should have a write lock.
  * Seen using flock: FreeBSD code */
 static int has_flock(int fd)
@@ -241,7 +227,6 @@ static struct el *read_pidfile(void)
 	n = read(fd,buf+1,sizeof buf-2);
 	if (n<1)
 		goto out;
-	buf[n] = '\0';
 	pid = strtoul(buf+1,&endp,10);
 	if(endp<=buf+1 || pid<1 || pid>0x7fffffff)
 		goto out;
@@ -450,7 +435,9 @@ static struct el * select_procs (int *num)
 	regex_t *preg;
 	pid_t myself = getpid();
 	struct el *list = NULL;
-	char cmd[4096];
+	char cmdline[CMDSTRSIZE];
+	char cmdsearch[CMDSTRSIZE];
+	char cmdoutput[CMDSTRSIZE];
 
 	ptp = do_openproc();
 	preg = do_regcomp();
@@ -495,30 +482,38 @@ static struct el * select_procs (int *num)
 				match = match_strlist (tty, opt_term);
 			}
 		}
-		if (opt_long || (match && opt_pattern)) {
-			if (opt_full && task.cmdline) {
-				int i = 0;
-				int bytes = sizeof (cmd) - 1;
+		if (task.cmdline && (opt_longlong || opt_full) && match && opt_pattern) {
+			int i = 0;
+			int bytes = sizeof (cmdline) - 1;
 
-				/* make sure it is always NUL-terminated */
-				cmd[bytes] = 0;
-				/* make room for SPC in loop below */
-				--bytes;
+			/* make sure it is always NUL-terminated */
+			cmdline[bytes] = 0;
+			/* make room for SPC in loop below */
+			--bytes;
 
-				strncpy (cmd, task.cmdline[i], bytes);
-				bytes -= strlen (task.cmdline[i++]);
-				while (task.cmdline[i] && bytes > 0) {
-					strncat (cmd, " ", bytes);
-					strncat (cmd, task.cmdline[i], bytes);
-					bytes -= strlen (task.cmdline[i++]) + 1;
-				}
-			} else {
-				strcpy (cmd, task.cmd);
+			strncpy (cmdline, task.cmdline[i], bytes);
+			bytes -= strlen (task.cmdline[i++]);
+			while (task.cmdline[i] && bytes > 0) {
+				strncat (cmdline, " ", bytes);
+				strncat (cmdline, task.cmdline[i], bytes);
+				bytes -= strlen (task.cmdline[i++]) + 1;
 			}
 		}
 
+		if (opt_long || opt_longlong || (match && opt_pattern)) {
+			if (opt_longlong && task.cmdline)
+				strncpy (cmdoutput, cmdline, CMDSTRSIZE);
+			else
+				strncpy (cmdoutput, task.cmd, CMDSTRSIZE);
+		}
+
 		if (match && opt_pattern) {
-			if (regexec (preg, cmd, 0, NULL, 0) != 0)
+			if (opt_full && task.cmdline)
+				strncpy (cmdsearch, cmdline, CMDSTRSIZE);
+			else
+				strncpy (cmdsearch, task.cmd, CMDSTRSIZE);
+
+			if (regexec (preg, cmdsearch, 0, NULL, 0) != 0)
 				match = 0;
 		}
 
@@ -543,9 +538,9 @@ static struct el * select_procs (int *num)
 				size = size * 5 / 4 + 4;
 				list = xrealloc(list, size * sizeof *list);
 			}
-			if (list && (opt_long || opt_echo)) {
+			if (list && (opt_long || opt_longlong || opt_echo)) {
 				list[matches].num = task.XXXID;
-				list[matches++].str = xstrdup (cmd);
+				list[matches++].str = xstrdup (cmdoutput);
 			} else if (list) {
 				list[matches++].num = task.XXXID;
 			} else {
@@ -560,21 +555,22 @@ static struct el * select_procs (int *num)
 	return list;
 }
 
-int signal_option(int *argc, char **argv)
+static int signal_option(int *argc, char **argv)
 {
 	int sig;
-	int i = 1;
-	while (i < *argc) {
-		sig = signal_name_to_number(argv[i] + 1);
-		if (sig == -1 && isdigit(argv[1][1]))
-			sig = atoi(argv[1] + 1);
-		if (-1 < sig) {
-			memmove(argv + i, argv + i + 1,
-				sizeof(char *) * (*argc - i));
-			(*argc)--;
-			return sig;
+	int i;
+	for (i = 1; i < *argc; i++) {
+		if (argv[i][0] == '-') {
+			sig = signal_name_to_number(argv[i] + 1);
+			if (sig == -1 && isdigit(argv[i][1]))
+				sig = atoi(argv[i] + 1);
+			if (-1 < sig) {
+				memmove(argv + i, argv + i + 1,
+					sizeof(char *) * (*argc - i));
+				(*argc)--;
+				return sig;
+			}
 		}
-		i++;
 	}
 	return -1;
 }
@@ -591,8 +587,9 @@ static void parse_opts (int argc, char **argv)
 	static const struct option longopts[] = {
 		{"signal", required_argument, NULL, SIGNAL_OPTION},
 		{"count", no_argument, NULL, 'c'},
-		{"delimeter", required_argument, NULL, 'd'},
+		{"delimiter", required_argument, NULL, 'd'},
 		{"list-name", no_argument, NULL, 'l'},
+		{"list-full", no_argument, NULL, 'a'},
 		{"full", no_argument, NULL, 'f'},
 		{"pgroup", required_argument, NULL, 'g'},
 		{"group", required_argument, NULL, 'G'},
@@ -623,7 +620,7 @@ static void parse_opts (int argc, char **argv)
 		strcat (opts, "e");
 	} else {
 		/* These options are for pgrep only */
-		strcat (opts, "cld:v");
+		strcat (opts, "clad:v");
 	}
 			
 	strcat (opts, "LF:fnoxP:g:s:u:U:G:t:?Vh");
@@ -706,6 +703,9 @@ static void parse_opts (int argc, char **argv)
  *			break; */
 		case 'l':   /* Solaris: long output format (pgrep only) Should require -f for beyond argv[0] maybe? */
 			opt_long = 1;
+			break;
+		case 'a':
+			opt_longlong = 1;
 			break;
 		case 'n':   /* Solaris: match only the newest */
 			if (opt_oldest|opt_negate|opt_newest)
@@ -814,7 +814,7 @@ int main (int argc, char **argv)
 		if (opt_count) {
 			fprintf(stdout, "%d\n", num);
 		} else {
-			if (opt_long)
+			if (opt_long || opt_longlong)
 				output_strlist (procs,num);
 			else
 				output_numlist (procs,num);

@@ -48,7 +48,7 @@ Why do ps and top show threads individually?
 
 What systems are supported?
 
-	Linux 2.4.xx and 2.6.xx are commonly tested and expected to work
+	Linux 2.4.xx 2.6.xx and 3.xx are commonly tested and expected to work
 	well.  SMP is well supported.  Multi-node cluster views require a
 	multi-node /proc filesystem; without that you will see a single-node
 	view.
@@ -79,7 +79,7 @@ Why are there so many procps projects?
 	represents the Debian, Fedora and openSUSE fork of procps.  To avoid
 	confusion and potential name clashes the package is now known as
 	procps-ng (next generation), the version number was raised to 3.3.0
-	and the library soname changed to libproc-ng-3.3.0.
+	and the library so-name changed to libprocps.so
 
 What is being done to procps-ng at its new home?
 

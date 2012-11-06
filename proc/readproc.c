@@ -353,7 +353,9 @@ ENTER(0x220);
         P->vm_swap = strtol(S,&S,10);
         continue;
     case_Groups:
-    {   int j = strchr(S, '\n') - S;        // currently lines end space + \n
+    {   char *nl = strchr(S, '\n');
+        int j = nl ? (nl - S) : strlen(S);
+
         if (j) {
             P->supgid = xmalloc(j+1);       // +1 in case space disappears
             memcpy(P->supgid, S, j);
@@ -362,8 +364,7 @@ ENTER(0x220);
             for ( ; j; j--)
                 if (' '  == P->supgid[j])
                     P->supgid[j] = ',';
-        } else
-            P->supgid = xstrdup("-");
+        }
         continue;
     }
     case_CapBnd:
@@ -411,6 +412,9 @@ ENTER(0x220);
         P->tgid = Pid;
         P->tid  = Pid;
     }
+
+    if (!P->supgid)
+        P->supgid = xstrdup("-");
 
 LEAVE(0x220);
 }
@@ -598,7 +602,7 @@ static char** file2strvec(const char* directory, const char* what) {
 
     // this is the former under utilized 'read_cmdline', which has been
     // generalized in support of these new libproc flags:
-    //     PROC_EDITCGRPCVT, PROC_EDITCMDLCVT
+    //     PROC_EDITCGRPCVT, PROC_EDITCMDLCVT and PROC_EDITENVRCVT
 static int read_unvectored(char *restrict const dst, unsigned sz, const char* whom, const char *what, char sep) {
     char path[PROCPATHLEN];
     int fd;
@@ -652,14 +656,13 @@ static char** vectorize_this_str (const char* src) {
     // It is similar to file2strvec except we filter and concatenate
     // the data into a single string represented as a single vector.
 static void fill_cgroup_cvt (const char* directory, proc_t *restrict p) {
- #define vMAX ( sizeof(dbuf) - (int)(dst - dbuf) )
-    char sbuf[1024], dbuf[1024];
+ #define vMAX ( MAX_BUFSZ - (int)(dst - dst_buffer) )
     char *src, *dst, *grp, *eob;
-    int tot, x, whackable_int = sizeof(dbuf);
+    int tot, x, whackable_int = MAX_BUFSZ;
 
-    *(dst = dbuf) = '\0';                        // empty destination
-    tot = read_unvectored(sbuf, sizeof(sbuf), directory, "cgroup", '\0');
-    for (src = sbuf, eob = sbuf + tot; src < eob; src += x) {
+    *(dst = dst_buffer) = '\0';                  // empty destination
+    tot = read_unvectored(src_buffer, MAX_BUFSZ, directory, "cgroup", '\0');
+    for (src = src_buffer, eob = src_buffer + tot; src < eob; src += x) {
         x = 1;                                   // loop assist
         if (!*src) continue;
         x = strlen((grp = src));
@@ -667,10 +670,10 @@ static void fill_cgroup_cvt (const char* directory, proc_t *restrict p) {
 #if 0
         grp += strspn(grp, "0123456789:");       // jump past group number
 #endif
-        dst += snprintf(dst, vMAX, "%s", (dst > dbuf) ? "," : "");
+        dst += snprintf(dst, vMAX, "%s", (dst > dst_buffer) ? "," : "");
         dst += escape_str(dst, grp, vMAX, &whackable_int);
     }
-    p->cgroup = vectorize_this_str(dbuf[0] ? dbuf : "-");
+    p->cgroup = vectorize_this_str(dst_buffer[0] ? dst_buffer : "-");
  #undef vMAX
 }
 
@@ -687,6 +690,17 @@ static void fill_cmdline_cvt (const char* directory, proc_t *restrict p) {
         escape_command(dst_buffer, p, MAX_BUFSZ, &whackable_int, uFLG);
     p->cmdline = vectorize_this_str(dst_buffer);
  #undef uFLG
+}
+
+    // This routine reads an 'environ' for the designated proc_t and
+    // guarantees the caller a valid proc_t.environ pointer.
+static void fill_environ_cvt (const char* directory, proc_t *restrict p) {
+    int whackable_int = MAX_BUFSZ;
+
+    dst_buffer[0] = '\0';
+    if (read_unvectored(src_buffer, MAX_BUFSZ, directory, "environ", ' '))
+        escape_str(dst_buffer, src_buffer, MAX_BUFSZ, &whackable_int);
+    p->environ = vectorize_this_str(dst_buffer[0] ? dst_buffer : "-");
 }
 
 // warning: interface may change
@@ -723,7 +737,7 @@ int read_cmdline(char *restrict const dst, unsigned sz, unsigned pid) {
 // room to spare.
 static proc_t* simple_readproc(PROCTAB *restrict const PT, proc_t *restrict const p) {
     static struct stat sb;     // stat() buffer
-    static char sbuf[1024];    // buffer for stat,statm,status
+    static char sbuf[4096];    // buffer for stat,statm,status
     char *restrict const path = PT->path;
     unsigned flags = PT->flags;
 
@@ -780,9 +794,12 @@ static proc_t* simple_readproc(PROCTAB *restrict const PT, proc_t *restrict cons
         }
     }
 
-    if (unlikely(flags & PROC_FILLENV))         // read /proc/#/environ
-        p->environ = file2strvec(path, "environ");
-    else
+    if (unlikely(flags & PROC_FILLENV)) {       // read /proc/#/environ
+        if (flags & PROC_EDITENVRCVT)
+            fill_environ_cvt(path, p);
+        else
+            p->environ = file2strvec(path, "environ");
+    } else
         p->environ = NULL;
 
     if (flags & (PROC_FILLCOM|PROC_FILLARG)) {  // read /proc/#/cmdline
@@ -793,8 +810,7 @@ static proc_t* simple_readproc(PROCTAB *restrict const PT, proc_t *restrict cons
     } else
         p->cmdline = NULL;
 
-    if ((flags & PROC_FILLCGROUP)               // read /proc/#/cgroup
-    && linux_version_code >= LINUX_VERSION(2,6,24)) {
+    if ((flags & PROC_FILLCGROUP)) {            // read /proc/#/cgroup
         if (flags & PROC_EDITCGRPCVT)
             fill_cgroup_cvt(path, p);
         else
@@ -827,7 +843,7 @@ next_proc:
 // path is a path to the task, with some room to spare.
 static proc_t* simple_readtask(PROCTAB *restrict const PT, const proc_t *restrict const p, proc_t *restrict const t, char *restrict const path) {
     static struct stat sb;     // stat() buffer
-    static char sbuf[1024];    // buffer for stat,statm,status
+    static char sbuf[4096];    // buffer for stat,statm,status
     unsigned flags = PT->flags;
 
     if (unlikely(stat(path, &sb) == -1))        /* no such dirent (anymore) */
@@ -890,9 +906,12 @@ static proc_t* simple_readtask(PROCTAB *restrict const PT, const proc_t *restric
         if (flags & PROC_FILLSUPGRP)
             supgrps_from_supgids(t);
 #endif
-        if (unlikely(flags & PROC_FILLENV))             // read /proc/#/task/#/environ
-            t->environ = file2strvec(path, "environ");
-        else
+        if (unlikely(flags & PROC_FILLENV)) {           // read /proc/#/task/#/environ
+            if (flags & PROC_EDITENVRCVT)
+                fill_environ_cvt(path, t);
+            else
+                t->environ = file2strvec(path, "environ");
+        } else
             t->environ = NULL;
 
         if (flags & (PROC_FILLCOM|PROC_FILLARG)) {      // read /proc/#/task/#/cmdline
@@ -903,8 +922,7 @@ static proc_t* simple_readtask(PROCTAB *restrict const PT, const proc_t *restric
         } else
             t->cmdline = NULL;
 
-        if ((flags & PROC_FILLCGROUP)                   // read /proc/#/task/#/cgroup
-        && linux_version_code >= LINUX_VERSION(2,6,24)) {
+        if ((flags & PROC_FILLCGROUP)) {                // read /proc/#/task/#/cgroup
             if (flags & PROC_EDITCGRPCVT)
                 fill_cgroup_cvt(path, t);
             else
@@ -1368,7 +1386,7 @@ proc_data_t *readproctab3 (int(*want_task)(proc_t *buf), PROCTAB *restrict const
  * and filled out proc_t structure.
  */
 proc_t * get_proc_stats(pid_t pid, proc_t *p) {
-	static char path[32], sbuf[1024];
+	static char path[32], sbuf[4096];
 	struct stat statbuf;
 
 	sprintf(path, "/proc/%d", pid);

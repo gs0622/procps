@@ -8,6 +8,7 @@ set uid [ exec id -u ]
 set not_uid [ expr { $uid + 1 } ] 
 set gid [ exec id -g ]
 set not_gid [ expr { $gid + 1 } ] 
+set ps "${topdir}ps/pscommand"
 set raw_tty [ exec tty ]
 regexp "/dev/(.+)" $raw_tty > tty
 
@@ -15,7 +16,7 @@ make_testproc
 
 set testproc_len [ string length $testproc_comm ]
 set testproc_trim [ string range $testproc_comm 0 [ expr { $testproc_len - 2 } ] ]
-set testproc1_sid [ string trim [ exec ps --no-headers -o sid $testproc1_pid ] ]
+set testproc1_sid [ string trim [ exec $ps --no-headers -o sid $testproc1_pid ] ]
 
 set test "pgprep with no arguments"
 spawn $pgrep
@@ -49,6 +50,10 @@ expect_blank $test
 set test "pgrep with process name"
 spawn $pgrep -l $testproc_comm
 expect_pass "$test" "^$testproc1_pid\\s+$testproc_comm\\s+$testproc2_pid\\s+$testproc_comm\\s*$"
+
+set test "pgrep with full command line"
+spawn $pgrep -a $testproc_comm
+expect_pass "$test" "^$testproc1_pid\\s+$testproc_path\\s+$sleep_time\\s+$testproc2_pid\\s+$testproc_path\\s+$sleep_time\\s*$"
 
 set test "pgrep find newest test pid"
 spawn $pgrep -n $testproc_comm

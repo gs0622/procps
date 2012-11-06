@@ -220,7 +220,7 @@ static void new_header(void)
 	     _("wa"));
 }
 
-static unsigned long unitConvert(unsigned int size)
+static unsigned long unitConvert(unsigned long size)
 {
 	float cvSize;
 	cvSize = (float)size / dataUnit * ((statMode == SLABSTAT) ? 1 : 1024);
@@ -258,14 +258,15 @@ static void new_format(void)
 	diow = *cpu_iow;
 	dstl = *cpu_zzz;
 	Div = duse + dsys + didl + diow + dstl;
+	if (!Div) Div = 1, didl = 1;
 	divo2 = Div / 2UL;
 	printf(format,
 	       running, blocked,
 	       unitConvert(kb_swap_used), unitConvert(kb_main_free),
 	       unitConvert(a_option?kb_inactive:kb_main_buffers),
 	       unitConvert(a_option?kb_active:kb_main_cached),
-	       (unsigned)( (*pswpin  * unitConvert(kb_per_page) * hz + divo2) / Div ),
-	       (unsigned)( (*pswpout * unitConvert(kb_per_page) * hz + divo2) / Div ),
+	       (unsigned)( (unitConvert(*pswpin  * kb_per_page) * hz + divo2) / Div ),
+	       (unsigned)( (unitConvert(*pswpout * kb_per_page) * hz + divo2) / Div ),
 	       (unsigned)( (*pgpgin		   * hz + divo2) / Div ),
 	       (unsigned)( (*pgpgout		   * hz + divo2) / Div ),
 	       (unsigned)( (*intr		   * hz + divo2) / Div ),
@@ -312,6 +313,7 @@ static void new_format(void)
 		}
 
 		Div = duse + dsys + didl + diow + dstl;
+		if (!Div) Div = 1, didl = 1;
 		divo2 = Div / 2UL;
 		printf(format,
 		       running,
@@ -320,9 +322,9 @@ static void new_format(void)
 		       unitConvert(a_option?kb_inactive:kb_main_buffers),
 		       unitConvert(a_option?kb_active:kb_main_cached),
 		       /*si */
-		       (unsigned)( ( (pswpin [tog] - pswpin [!tog])*unitConvert(kb_per_page)+sleep_half )/sleep_time ),
+		       (unsigned)( ( unitConvert((pswpin [tog] - pswpin [!tog])*kb_per_page)+sleep_half )/sleep_time ),
 		       /* so */
-		       (unsigned)( ( (pswpout[tog] - pswpout[!tog])*unitConvert(kb_per_page)+sleep_half )/sleep_time ),
+		       (unsigned)( ( unitConvert((pswpout[tog] - pswpout[!tog])*kb_per_page)+sleep_half )/sleep_time ),
 		       /* bi */
 		       (unsigned)( (  pgpgin [tog] - pgpgin [!tog]	       +sleep_half )/sleep_time ),
 		       /* bo */
@@ -814,8 +816,8 @@ int main(int argc, char *argv[])
 		usage(stderr);
 
 	if (moreheaders) {
-		int tmp = winhi() - 3;
-		height = ((tmp > 0) ? tmp : 22);
+		int wheight = winhi() - 3;
+		height = ((wheight > 0) ? wheight : 22);
 	}
 	setlinebuf(stdout);
 	switch (statMode) {
