@@ -6,7 +6,7 @@ AM_CPPFLAGS = \
 
 #
 # See http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-LIBprocps_CURRENT=1
+LIBprocps_CURRENT=2
 LIBprocps_REVISION=0
 LIBprocps_AGE=0
 

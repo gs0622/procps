@@ -50,12 +50,12 @@
 static unsigned short cols, rows;
 static struct termios saved_tty;
 static long delay = 3;
-static int (*sort_func)(const struct slab_info *, const struct slab_info *);
+static int (*sort_func)(const struct slab_node *, const struct slab_node *);
 
-static struct slab_info *merge_objs(struct slab_info *a, struct slab_info *b)
+static struct slab_node *merge_objs(struct slab_node *a, struct slab_node *b)
 {
-	struct slab_info sorted_list;
-	struct slab_info *curr = &sorted_list;
+	struct slab_node sorted_list;
+	struct slab_node *curr = &sorted_list;
 
 	while ((a != NULL) && (b != NULL)) {
 		if (sort_func(a, b)) {
@@ -74,11 +74,11 @@ static struct slab_info *merge_objs(struct slab_info *a, struct slab_info *b)
 }
 
 /*
- * slabsort - merge sort the slab_info linked list based on sort_func
+ * slabsort - merge sort the slab_node linked list based on sort_func
  */
-static struct slab_info *slabsort(struct slab_info *list)
+static struct slab_node *slabsort(struct slab_node *list)
 {
-	struct slab_info *a, *b;
+	struct slab_node *a, *b;
 
 	if ((list == NULL) || (list->next == NULL))
 		return list;
@@ -101,63 +101,63 @@ static struct slab_info *slabsort(struct slab_info *list)
  * Sort Routines.  Each of these should be associated with a command-line
  * search option.  The functions should fit the prototype:
  *
- *	int sort_foo(const struct slab_info *a, const struct slab_info *b)
+ *	int sort_foo(const struct slab_node *a, const struct slab_node *b)
  *
  * They return one if the first parameter is larger than the second
  * Otherwise, they return zero.
  */
 
-static int sort_name(const struct slab_info *a, const struct slab_info *b)
+static int sort_name(const struct slab_node *a, const struct slab_node *b)
 {
 	return (strcmp(a->name, b->name) < 0) ? 1 : 0;
 }
 
-static int sort_nr_objs(const struct slab_info *a, const struct slab_info *b)
+static int sort_nr_objs(const struct slab_node *a, const struct slab_node *b)
 {
 	return (a->nr_objs > b->nr_objs);
 }
 
-static int sort_nr_active_objs(const struct slab_info *a,
-				const struct slab_info *b)
+static int sort_nr_active_objs(const struct slab_node *a,
+				const struct slab_node *b)
 {
 	return (a->nr_active_objs > b->nr_active_objs);
 }
 
-static int sort_obj_size(const struct slab_info *a, const struct slab_info *b)
+static int sort_obj_size(const struct slab_node *a, const struct slab_node *b)
 {
 	return (a->obj_size > b->obj_size);
 }
 
-static int sort_objs_per_slab(const struct slab_info *a,
-				const struct slab_info *b)
+static int sort_objs_per_slab(const struct slab_node *a,
+				const struct slab_node *b)
 {
 	return (a->objs_per_slab > b->objs_per_slab);
 }
 
-static int sort_pages_per_slab(const struct slab_info *a,
-		const struct slab_info *b)
+static int sort_pages_per_slab(const struct slab_node *a,
+		const struct slab_node *b)
 {
 	return (a->pages_per_slab > b->pages_per_slab);
 }
 
-static int sort_nr_slabs(const struct slab_info *a, const struct slab_info *b)
+static int sort_nr_slabs(const struct slab_node *a, const struct slab_node *b)
 {
 	return (a->nr_slabs > b->nr_slabs);
 }
 
-static int sort_nr_active_slabs(const struct slab_info *a,
-			const struct slab_info *b)
+static int sort_nr_active_slabs(const struct slab_node *a,
+			const struct slab_node *b)
 {
 	return (a->nr_active_slabs > b->nr_active_slabs);
 }
 
 
-static int sort_use(const struct slab_info *a, const struct slab_info *b)
+static int sort_use(const struct slab_node *a, const struct slab_node *b)
 {
 	return (a->use > b->use);
 }
 
-static int sort_cache_size(const struct slab_info *a, const struct slab_info *b)
+static int sort_cache_size(const struct slab_node *a, const struct slab_node *b)
 {
 	return (a->cache_size > b->cache_size);
 }
@@ -288,7 +288,7 @@ int main(int argc, char *argv[])
 {
 	int o;
 	unsigned short old_rows;
-	struct slab_info *slab_list = NULL;
+	struct procps_slabinfo *slabinfo = NULL;
 	int run_once = 0, retval = EXIT_SUCCESS;
 
 	static const struct option longopts[] = {
@@ -318,8 +318,8 @@ int main(int argc, char *argv[])
 					_("delay must be positive integer"));
 			break;
 		case 's':
-			sort_func = (int (*)(const struct slab_info*,
-				const struct slab_info *)) set_sort_func(optarg[0]);
+			sort_func = (int (*)(const struct slab_node*,
+				const struct slab_node *)) set_sort_func(optarg[0]);
 			break;
 		case 'o':
 			run_once=1;
@@ -335,6 +335,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (procps_slabinfo_new(&slabinfo) < 0)
+		return EXIT_FAILURE;
+
 	if (tcgetattr(STDIN_FILENO, &saved_tty) == -1)
 		xwarn(_("terminal setting retrieval"));
 
@@ -347,16 +350,16 @@ int main(int argc, char *argv[])
 	}
 	signal(SIGINT, sigint_handler);
 
+
 	do {
-		struct slab_info *curr;
-		struct slab_stat stats;
 		struct timeval tv;
 		fd_set readfds;
 		char c;
-		int i;
-		memset(&stats, 0, sizeof(struct slab_stat));
+		int i, readval;
+		struct slab_node *curr;
 
-		if (get_slabinfo(&slab_list, &stats)) {
+		if ( (readval = procps_slabinfo_read(slabinfo, NULL)) < 0) {
+			fprintf(stderr, "Error opening slabinfo file %s\n", strerror(-readval));
 			retval = EXIT_FAILURE;
 			break;
 		}
@@ -375,22 +378,22 @@ int main(int argc, char *argv[])
 		       /* Translation Hint: Next five strings must not
 			* exceed 35 length in characters.  */
 		       _("Active / Total Objects (% used)"),
-		       stats.nr_active_objs, stats.nr_objs,
-		       100.0 * stats.nr_active_objs / stats.nr_objs,
+		       slabinfo->nr_active_objs, slabinfo->nr_objs,
+		       100.0 * slabinfo->nr_active_objs / slabinfo->nr_objs,
 		       _("Active / Total Slabs (% used)"),
-		       stats.nr_active_slabs, stats.nr_slabs,
-		       100.0 * stats.nr_active_slabs / stats.nr_slabs,
+		       slabinfo->nr_active_slabs, slabinfo->nr_slabs,
+		       100.0 * slabinfo->nr_active_slabs / slabinfo->nr_slabs,
 		       _("Active / Total Caches (% used)"),
-		       stats.nr_active_caches, stats.nr_caches,
-		       100.0 * stats.nr_active_caches / stats.nr_caches,
+		       slabinfo->nr_active_caches, slabinfo->nr_caches,
+		       100.0 * slabinfo->nr_active_caches / slabinfo->nr_caches,
 		       _("Active / Total Size (% used)"),
-		       stats.active_size / 1024.0, stats.total_size / 1024.0,
-		       100.0 * stats.active_size / stats.total_size,
+		       slabinfo->active_size / 1024.0, slabinfo->total_size / 1024.0,
+		       100.0 * slabinfo->active_size / slabinfo->total_size,
 		       _("Minimum / Average / Maximum Object"),
-		       stats.min_obj_size / 1024.0, stats.avg_obj_size / 1024.0,
-		       stats.max_obj_size / 1024.0);
+		       slabinfo->min_obj_size / 1024.0, slabinfo->avg_obj_size / 1024.0,
+		       slabinfo->max_obj_size / 1024.0);
 
-		slab_list = slabsort(slab_list);
+		slabinfo->slab_list = slabsort(slabinfo->slab_list);
 
 		attron(A_REVERSE);
 		/* Translation Hint: Please keep alignment of the
@@ -398,7 +401,7 @@ int main(int argc, char *argv[])
 		print_line("%-78s\n", _("  OBJS ACTIVE  USE OBJ SIZE  SLABS OBJ/SLAB CACHE SIZE NAME"));
 		attroff(A_REVERSE);
 
-		curr = slab_list;
+		curr = slabinfo->slab_list;
 		for (i = 0; i < rows - 8 && curr->next; i++) {
 			print_line("%6u %6u %3u%% %7.2fK %6u %8u %9uK %-23s\n",
 				curr->nr_objs, curr->nr_active_objs, curr->use,
@@ -408,7 +411,7 @@ int main(int argc, char *argv[])
 			curr = curr->next;
 		}
 
-		put_slabinfo(slab_list);
+		procps_slabinfo_clear(slabinfo);
 		if (!run_once) {
 			refresh();
 			FD_ZERO(&readfds);
@@ -424,7 +427,7 @@ int main(int argc, char *argv[])
 	} while (delay);
 
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_tty);
-	free_slabinfo(slab_list);
+	procps_slabinfo_free(slabinfo);
 	if (!run_once)
 		endwin();
 	return retval;

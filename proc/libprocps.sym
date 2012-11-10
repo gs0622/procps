@@ -64,3 +64,13 @@ global:
 local:
 	*;
 };
+
+LIBPROCPS_2 {
+global:
+	procps_slabinfo_new;
+	procps_slabinfo_read;
+	procps_slabinfo_clear;
+	procps_slabinfo_free;
+local:
+	*;
+} LIBPROCPS_0;

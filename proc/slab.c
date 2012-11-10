@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include "slab.h"
 #include "procps.h"
@@ -36,25 +37,65 @@
 #define SLABINFO_VER_LEN	100
 #define SLABINFO_FILE		"/proc/slabinfo"
 
-static struct slab_info *free_index;
+/* 
+ * procps_slabinfo_new:
+ * @slabinfo: procps slabinfo
+ *
+ * Create a new slabinfo structure
+ */
+int procps_slabinfo_new(struct procps_slabinfo **slabinfo)
+{
+	struct procps_slabinfo *si;
+
+	si = calloc(1, sizeof(struct procps_slabinfo));
+	if (!si)
+		return -ENOMEM;
+	*slabinfo = si;
+	return 0;
+}
 
 /*
- * get_slabnode - allocate slab_info structures using a free list
+ * procps_slab_free:
+ * @slabinfo procps slabinfo strucutre
+ *
+ * Deallacate or free all memory in the slabinfo structure including in
+ * the lists
+ */
+void procps_slabinfo_free(struct procps_slabinfo *slabinfo)
+{
+	struct slab_node *curr, *next;
+
+	curr = slabinfo->slab_list;
+	while (curr) {
+		next = curr->next;
+		free(curr);
+		curr = next;
+	}
+	curr = slabinfo->free_head;
+	while (curr) {
+		next = curr->next;
+		free(curr);
+		curr = next;
+	}
+	free(slabinfo);
+}
+/*
+ * get_slabnode - allocate slab_node structures using a free list
  *
  * In the fast path, we simply return a node off the free list.  In the slow
  * list, we malloc() a new node.  The free list is never automatically reaped,
  * both for simplicity and because the number of slab caches is fairly
  * constant.
  */
-static struct slab_info *get_slabnode(void)
+static struct slab_node *get_slabnode(struct procps_slabinfo *slabinfo)
 {
-	struct slab_info *node;
+	struct slab_node *node;
 
-	if (free_index) {
-		node = free_index;
-		free_index = free_index->next;
+	if (slabinfo->free_next) {
+		node = slabinfo->free_next;
+		slabinfo->free_next = slabinfo->free_next->next;
 	} else {
-		node = xmalloc(sizeof(struct slab_info));
+		node = xmalloc(sizeof(struct procps_slabinfo));
 	}
 
 	return node;
@@ -80,25 +121,18 @@ static int slab_badname_detect(const char *restrict buffer)
 }
 
 /*
- * put_slabinfo - return all allocated nodes to the free list
+ * procps_slabinfo_clear:
+ * @slabinfo: slab information
+ *
+ * Put all of the slabs into the free index
  */
-void put_slabinfo(struct slab_info *head)
+void procps_slabinfo_clear(struct procps_slabinfo *slabinfo)
 {
-	free_index = head;
+	slabinfo->free_head = slabinfo->slab_list;
+	slabinfo->free_next = slabinfo->free_head;
+	slabinfo->slab_list = NULL;
 }
 
-/*
- * free_slabinfo - deallocate the memory associated with each node in the
- * slab_info linked list
- */
-void free_slabinfo(struct slab_info *list)
-{
-	while (list) {
-		struct slab_info *temp = list->next;
-		free(list);
-		list = temp;
-	}
-}
 
 // parse_slabinfo20 - actual parse routine for slabinfo 2.x (2.6 kernels)
 // Note: difference between 2.0 and 2.1 is in the ": globalstat" part where version 2.1 
@@ -129,16 +163,15 @@ void free_slabinfo(struct slab_info *list)
 //  : slabdata <active_slabs> <num_slabs> <sharedavail> \
 //  : globalstat <listallocs> <maxobjs> <grown> <reaped> <error> <maxfreeable> <freelimit> \
 //  : cpustat <allochit> <allocmiss> <freehit> <freemiss>
-static int parse_slabinfo20(struct slab_info **list, struct slab_stat *stats,
-				FILE *f)
+static int parse_slabinfo20(struct procps_slabinfo *slabinfo, FILE *f)
 {
-	struct slab_info *curr = NULL, *prev = NULL;
+	struct slab_node *curr = NULL, *prev = NULL;
 	char buffer[SLABINFO_LINE_LEN];
 	int entries = 0;
 	int page_size = getpagesize();
 
-	stats->min_obj_size = INT_MAX;
-	stats->max_obj_size = 0;
+	slabinfo->min_obj_size = INT_MAX;
+	slabinfo->max_obj_size = 0;
 
 	while (fgets(buffer, SLABINFO_LINE_LEN, f)) {
 		int assigned;
@@ -146,12 +179,12 @@ static int parse_slabinfo20(struct slab_info **list, struct slab_stat *stats,
 		if (buffer[0] == '#')
 			continue;
 	
-		curr = get_slabnode();
+		curr = get_slabnode(slabinfo);
 		if (!curr)
 			break;
 
 		if (entries++ == 0)
-			*list = curr;
+			slabinfo->slab_list = curr;
 		else
 			if (prev)
 				prev->next = curr;
@@ -170,26 +203,26 @@ static int parse_slabinfo20(struct slab_info **list, struct slab_stat *stats,
 			break;
 		}
 
-		if (curr->obj_size < stats->min_obj_size)
-			stats->min_obj_size = curr->obj_size;
-		if (curr->obj_size > stats->max_obj_size)
-			stats->max_obj_size = curr->obj_size;
+		if (curr->obj_size < slabinfo->min_obj_size)
+			slabinfo->min_obj_size = curr->obj_size;
+		if (curr->obj_size > slabinfo->max_obj_size)
+			slabinfo->max_obj_size = curr->obj_size;
 
 		curr->cache_size = (unsigned long)curr->nr_slabs * curr->pages_per_slab * page_size;
 
 		if (curr->nr_objs) {
 			curr->use = 100 * curr->nr_active_objs / curr->nr_objs;
-			stats->nr_active_caches++;
+			slabinfo->nr_active_caches++;
 		} else
 			curr->use = 0;
 
-		stats->nr_objs += curr->nr_objs;
-		stats->nr_active_objs += curr->nr_active_objs;
-		stats->total_size += (unsigned long)curr->nr_objs * curr->obj_size;
-		stats->active_size += (unsigned long)curr->nr_active_objs * curr->obj_size;
-		stats->nr_pages += curr->nr_slabs * curr->pages_per_slab;
-		stats->nr_slabs += curr->nr_slabs;
-		stats->nr_active_slabs += curr->nr_active_slabs;
+		slabinfo->nr_objs += curr->nr_objs;
+		slabinfo->nr_active_objs += curr->nr_active_objs;
+		slabinfo->total_size += (unsigned long)curr->nr_objs * curr->obj_size;
+		slabinfo->active_size += (unsigned long)curr->nr_active_objs * curr->obj_size;
+		slabinfo->nr_pages += curr->nr_slabs * curr->pages_per_slab;
+		slabinfo->nr_slabs += curr->nr_slabs;
+		slabinfo->nr_active_slabs += curr->nr_active_slabs;
 
 		prev = curr;
 	}
@@ -200,9 +233,9 @@ static int parse_slabinfo20(struct slab_info **list, struct slab_stat *stats,
 	}
 
 	curr->next = NULL;
-	stats->nr_caches = entries;
-	if (stats->nr_objs)
-		stats->avg_obj_size = stats->total_size / stats->nr_objs;
+	slabinfo->nr_caches = entries;
+	if (slabinfo->nr_objs)
+		slabinfo->avg_obj_size = slabinfo->total_size / slabinfo->nr_objs;
 
 	return 0;
 }
@@ -210,26 +243,25 @@ static int parse_slabinfo20(struct slab_info **list, struct slab_stat *stats,
 /*
  * parse_slabinfo11 - actual parsing routine for slabinfo 1.1 (2.4 kernels)
  */
-static int parse_slabinfo11(struct slab_info **list, struct slab_stat *stats,
-				FILE *f)
+static int parse_slabinfo11(struct procps_slabinfo *slabinfo, FILE *f)
 {
-	struct slab_info *curr = NULL, *prev = NULL;
+	struct slab_node *curr = NULL, *prev = NULL;
 	char buffer[SLABINFO_LINE_LEN];
 	int entries = 0;
 	int page_size = getpagesize();
 
-	stats->min_obj_size = INT_MAX;
-	stats->max_obj_size = 0;
+	slabinfo->min_obj_size = INT_MAX;
+	slabinfo->max_obj_size = 0;
 
 	while (fgets(buffer, SLABINFO_LINE_LEN, f)) {
 		int assigned;
 
-		curr = get_slabnode();
+		curr = get_slabnode(slabinfo);
 		if (!curr)
 			break;
 
 		if (entries++ == 0)
-			*list = curr;
+			slabinfo->slab_list = curr;
 		else
 			if (prev)
 				prev->next = curr;
@@ -249,16 +281,16 @@ static int parse_slabinfo11(struct slab_info **list, struct slab_stat *stats,
 			break;
 		}
 
-		if (curr->obj_size < stats->min_obj_size)
-			stats->min_obj_size = curr->obj_size;
-		if (curr->obj_size > stats->max_obj_size)
-			stats->max_obj_size = curr->obj_size;
+		if (curr->obj_size < slabinfo->min_obj_size)
+			slabinfo->min_obj_size = curr->obj_size;
+		if (curr->obj_size > slabinfo->max_obj_size)
+			slabinfo->max_obj_size = curr->obj_size;
 
 		curr->cache_size = (unsigned long)curr->nr_slabs * curr->pages_per_slab * page_size;
 
 		if (curr->nr_objs) {
 			curr->use = 100 * curr->nr_active_objs / curr->nr_objs;
-			stats->nr_active_caches++;
+			slabinfo->nr_active_caches++;
 		} else
 			curr->use = 0;
 
@@ -266,26 +298,26 @@ static int parse_slabinfo11(struct slab_info **list, struct slab_stat *stats,
 			curr->objs_per_slab = curr->pages_per_slab *
 					page_size / curr->obj_size;		
 
-		stats->nr_objs += curr->nr_objs;
-		stats->nr_active_objs += curr->nr_active_objs;
-		stats->total_size += (unsigned long)curr->nr_objs * curr->obj_size;
-		stats->active_size += (unsigned long)curr->nr_active_objs * curr->obj_size;
-		stats->nr_pages += curr->nr_slabs * curr->pages_per_slab;
-		stats->nr_slabs += curr->nr_slabs;
-		stats->nr_active_slabs += curr->nr_active_slabs;
+		slabinfo->nr_objs += curr->nr_objs;
+		slabinfo->nr_active_objs += curr->nr_active_objs;
+		slabinfo->total_size += (unsigned long)curr->nr_objs * curr->obj_size;
+		slabinfo->active_size += (unsigned long)curr->nr_active_objs * curr->obj_size;
+		slabinfo->nr_pages += curr->nr_slabs * curr->pages_per_slab;
+		slabinfo->nr_slabs += curr->nr_slabs;
+		slabinfo->nr_active_slabs += curr->nr_active_slabs;
 
 		prev = curr;
 	}
 
 	if (!curr) {
 		fprintf(stderr, "\rerror reading slabinfo!\n");
-		return 1;
+		return -1;
 	}
 
 	curr->next = NULL;
-	stats->nr_caches = entries;
-	if (stats->nr_objs)
-		stats->avg_obj_size = stats->total_size / stats->nr_objs;
+	slabinfo->nr_caches = entries;
+	if (slabinfo->nr_objs)
+		slabinfo->avg_obj_size = slabinfo->total_size / slabinfo->nr_objs;
 
 	return 0;
 }
@@ -295,56 +327,59 @@ static int parse_slabinfo11(struct slab_info **list, struct slab_stat *stats,
  *
  * Not yet implemented.  Please feel free.
  */
-static int parse_slabinfo10(struct slab_info **list, struct slab_stat *stats,
-				FILE *f)
+static int parse_slabinfo10(struct procps_slabinfo *slabinfo, FILE *f)
 {
-	(void) list, (void) stats, (void) f;
 	fprintf(stderr, "slabinfo version 1.0 not yet supported\n");
-	return 1;
+	return -1;
 }
 
 /*
- * slabinfo - parse the system's slabinfo and fill out both a linked list of
- * slab_info structures and the slab_stat structure
+ * procps_slabinfo_read:
+ * @slabinfo: structure to place data into
+ * @filename: optional filename instead of system default to read slab stats
  *
- * The function returns zero on success, in which case 'list' and 'stats' are
- * valid.  Nonzero is returned on failure and the state of 'list' and 'stats'
- * are undefined.
+ * The function returns zero on success
  */
-int get_slabinfo(struct slab_info **list, struct slab_stat *stats)
+int procps_slabinfo_read(struct procps_slabinfo *slabinfo, const char *filename)
 {
 	FILE *slabfile;
 	char buffer[SLABINFO_VER_LEN];
 	int major, minor, ret = 0;
 
-	slabfile = fopen(SLABINFO_FILE, "r");
-	if (!slabfile) {
-		perror("fopen " SLABINFO_FILE);
-		return 1;
+	if (filename == NULL) {
+		slabfile = fopen(SLABINFO_FILE, "r");
+		if (!slabfile) {
+			return -errno;
+		}
+	} else {
+		slabfile = fopen(filename, "r");
+		if (!slabfile) {
+			return -errno;
+		}
 	}
 
 	if (!fgets(buffer, SLABINFO_VER_LEN, slabfile)) {
 		fprintf(stderr, "cannot read from slabinfo\n");
 		fclose(slabfile);
-		return 1;
+		return -1;
 	}
 
 	if (sscanf(buffer, "slabinfo - version: %d.%d", &major, &minor) != 2) {
 		fprintf(stderr, "not the good old slabinfo we know\n");
 		fclose(slabfile);
-		return 1;
+		return -1;
 	}
 
 	if (major == 2)
-		ret = parse_slabinfo20(list, stats, slabfile);
+		ret = parse_slabinfo20(slabinfo, slabfile);
 	else if (major == 1 && minor == 1)
-		ret = parse_slabinfo11(list, stats, slabfile);
+		ret = parse_slabinfo11(slabinfo, slabfile);
 	else if (major == 1 && minor == 0)
-		ret = parse_slabinfo10(list, stats, slabfile);
+		ret = parse_slabinfo10(slabinfo, slabfile);
 	else {
 		fprintf(stderr, "unrecognizable slabinfo version\n");
 		fclose(slabfile);
-		return 1;
+		return -1;
 	}
 
 	fclose(slabfile);

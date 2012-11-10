@@ -3,9 +3,9 @@
 
 #define SLAB_INFO_NAME_LEN      128
 
-struct slab_info {
+struct slab_node {
 	char name[SLAB_INFO_NAME_LEN];  /* name of this cache */
-	struct slab_info *next;
+	struct slab_node *next;
 	unsigned long cache_size;       /* size of entire cache */
 	unsigned nr_objs;               /* number of objects in this cache */
 	unsigned nr_active_objs;        /* number of active objects */
@@ -17,7 +17,13 @@ struct slab_info {
 	unsigned use;                   /* percent full: total / active */
 };
 
-struct slab_stat {
+struct procps_slabinfo {
+	struct slab_node *slab_list;  /* linked list of slab nodes */
+
+	struct slab_node *free_head; /* pool of free slab nodes */
+	struct slab_node *free_next; /* next available free slabnode */
+
+	/* overall stats */
 	unsigned long total_size;       /* size of all objects */
 	unsigned long active_size;      /* size of all active objects */
 	unsigned nr_objs;               /* number of objects, among all caches */
@@ -32,8 +38,20 @@ struct slab_stat {
 	unsigned max_obj_size;          /* size of largest object */
 };
 
-extern void put_slabinfo(struct slab_info *);
-extern void free_slabinfo(struct slab_info *);
-extern int get_slabinfo(struct slab_info **, struct slab_stat *);
+int procps_slabinfo_new(struct procps_slabinfo **slabinfo);
+int procps_slabinfo_read(struct procps_slabinfo *slabinfo, const char *filename);
+void procps_slabinfo_clear(struct procps_slabinfo *slabinfo);
+void procps_slabinfo_free(struct procps_slabinfo *slabinfo);
 
+void procps_slabinfo_active_objs_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_objs_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_active_slabs_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_slabs_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_active_caches_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_caches_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_active_size_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_total_size_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_min_obj_size_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_avg_obj_size_get(const struct procps_slabinfo *slabinfo);
+void procps_slabinfo_max_obj_size_get(const struct procps_slabinfo *slabinfo);
 #endif /* _PROC_SLAB_H */
